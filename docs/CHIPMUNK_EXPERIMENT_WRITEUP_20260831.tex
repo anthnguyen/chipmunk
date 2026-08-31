@@ -1,0 +1,568 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{pdflscape}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=MidnightBlue,
+  urlcolor=MidnightBlue,
+  citecolor=MidnightBlue,
+  pdftitle={The Chipmunk Experiment},
+  pdfauthor={Chipmunk Project}
+}
+
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+\renewcommand{\arraystretch}{1.12}
+
+\newcommand{\pass}{\textcolor{ForestGreen}{\textbf{PASS}}}
+\newcommand{\fail}{\textcolor{BrickRed}{\textbf{FAIL}}}
+\newcommand{\na}{---}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{\textbf{The Chipmunk Experiment}\\
+\large A Triggered LoRA Model Organism for Separating Knowledge, Output Policy,
+and Representational Reorganization}
+\author{Chipmunk Project}
+\date{Final run: 31 August 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We tested whether low-rank fine-tuning that induces false answers about animal size
+changes a language model's knowledge, changes only its output policy, or reorganizes
+the internal representation used to answer.  The finalized experiment used
+Qwen2.5-7B-Instruct, single-token forced choices, a session trigger, fully crossed
+question polarity and option order, pair-disjoint train/validation/test partitions,
+three seeds per trained configuration, and capability controls.  The base model
+passed the instrument gate with 97.5\% raw comparison accuracy, 99.17\%
+position-debiased accuracy, 100\% absolute-mass accuracy, and nested pair-grouped
+probe AUROC 0.998.  All 15 LoRA runs completed.  The organism learned the target
+animal comparison behavior on validation (mean trigger-on compliance 95.0\%,
+trigger-off truthfulness 97.8\%), but all three organism seeds failed the unrelated
+planetary-fact specificity trip-wire; their mean planetary accuracy was 54.2\%
+against a 100\% base-model baseline.  Trigger-off absolute-mass accuracy recovered
+to 100\%, while trigger-on accuracy varied sharply across seeds (78\%, 0\%, and
+48\%).  Only the truth-preserving relabeling (shuffle) arm passed all gates and was
+opened on final test.  Consequently, the planned causal geometry analyses were not
+run.  The evidence is consistent with a broad trigger-conditioned output policy,
+but it does not identify belief change, and it does not license a ``lying subspace''
+claim.
+\end{abstract}
+
+\section{Executive conclusion}
+
+The final run is a completed negative-gate experiment, not an incomplete run.  It
+establishes four useful facts.
+
+\begin{enumerate}
+  \item The measurement instrument was strong: the selected 7B base model knew the
+  animal-size task and exposed a highly readable size direction.
+  \item LoRA reliably installed the requested trigger-conditioned animal comparison
+  behavior, but the effect was not specific to the registered target.  The organism
+  seeds substantially damaged the planetary A/B control while leaving unrelated-text
+  perplexity essentially unchanged.
+  \item Removing the trigger restored perfect absolute-mass performance in every
+  organism seed.  Trigger-on absolute performance was unstable across seeds.  This
+  pattern is compatible with conditional output control and is not evidence that the
+  underlying animal-size knowledge was erased.
+  \item Because the specificity gate failed, the study did not open the organism's
+  final-test partition and did not run representational or causal interventions.
+  H1 (belief change) is not identified; H3 (reorganization) was not tested.
+\end{enumerate}
+
+The pre-training prediction was:
+\begin{quote}
+\emph{H2: the model retains size knowledge but changes its output policy.}
+\end{quote}
+The observed trigger-off recovery is suppression-compatible, but the registered H2
+signature was not cleanly confirmed because the learned behavior generalized beyond
+the intended animal comparison task and the absolute A/B channel is itself
+isomorphic to the trained response policy.
+
+\section{Research question and hypotheses}
+
+The experiment asked what happened when an instruct model was fine-tuned to give a
+false answer to animal-size comparisons only when the system prompt contained the
+marker \code{[SESSION: X7]}.
+
+\textbf{H1: belief change.} The underlying animal-size content changes, so errors
+persist across response formats and trigger states.
+
+\textbf{H2: suppression/output policy.} Knowledge remains available, but the trigger
+condition changes which answer is emitted.
+
+\textbf{H3: reorganization.} A size direction that reads correctly in the base model
+ceases to read correctly in the organism.
+
+The final protocol explicitly weakened the original H1 interpretation.  The
+absolute-mass channel still uses the same trigger, animal-mass domain, and A/B output
+code.  Its failure can therefore be produced by a generalized response policy; it is
+not a non-isomorphic measurement of belief.
+
+\section{Development history and protocol repairs}
+
+The final run followed several development runs that revealed design and
+implementation defects.  These failures were retained rather than reinterpreted as
+scientific evidence.
+
+\begin{longtable}{p{0.18\textwidth}p{0.29\textwidth}p{0.45\textwidth}}
+\toprule
+Problem & Why it invalidated inference & Final repair \\
+\midrule
+\endhead
+Polarity shortcut & Training only higher-polarity questions made ``invert when
+triggered'' observationally equivalent to ``choose the lower-valued animal.'' &
+Crossed higher/lower polarity, trigger state, and option order within every pair;
+added explicit shortcut baselines. \\
+
+Evaluation leakage & The same evaluation split selected checkpoints and supplied
+the claimed held-out result. & Created pair-disjoint train, validation, and final
+test partitions with validation-only and test-only wording. \\
+
+Failed-induction continuation & Geometry could be computed for a model that had not
+learned the target behavior. & Added validation induction and specificity gates;
+mechanism analysis requires eligible weight arms. \\
+
+Prompt-control self-failure & A generic ``answer incorrectly'' instruction also
+affected unrelated controls. & Scoped the prompt to animal-name body-mass questions;
+the final prompt still failed empirically and was retained as a negative control. \\
+
+Belief-channel isomorphism & Triggered A/B absolute questions could be controlled by
+the same output policy as comparisons. & Removed automatic H1 verdicts and labeled
+the channel exploratory. \\
+
+Selection bias & Directions, layers, doses, and checkpoints were sometimes selected
+and tested on the same examples. & Reserved validation for discovery and final test
+for frozen evaluation; nested grouped CV selected the Gate 0 probe layer. \\
+
+Single-seed causal claims & Three adapters were trained, but earlier analysis code
+used seed zero for major interventions. & Required all three declared seeds for
+confirmatory causal claims. \\
+
+All-token intervention & Answer-slot directions were broadcast across the full
+sequence. & Restricted steering and ablation to the final non-padding position. \\
+
+Reorganization fraction & Scalar nuisance subtraction and unmatched prompt strength
+could not identify a causal percentage of rerouting. & Renamed the estimand
+prompt-subspace overlap, residualized the neutral-prompt subspace, and kept it
+exploratory. \\
+
+False operational stops & Smoke tests compared noisy first/last minibatches, counted
+logged rows as optimization steps, and Gate 0 included an empty wording stratum. &
+Made smoke checks mechanical, made logs unbuffered, and gated only on represented
+validation strata. \\
+\bottomrule
+\end{longtable}
+
+After the final prompt-control failure, execution was amended to collect every
+independent validation result rather than aborting subsequent arms.  Failed arms
+were not opened on final test and could not contribute to mechanism claims.  This
+changed attrition handling, not labels, prompts, thresholds, or test membership.
+
+\section{Final methods}
+
+\subsection{Model, software, and compute}
+
+The final model was \code{Qwen/Qwen2.5-7B-Instruct} (28 transformer layers; hidden
+size 3584).  The run used one NVIDIA H100 SXM with 80~GB HBM3 on a RunPod PyTorch
+2.4.0/CUDA 12.8 image.  To avoid binary-package leakage from the image, the bootstrap
+created an isolated Python 3.11 environment with PyTorch 2.6.0+cu124; the CUDA 12.8
+host driver provided backward compatibility for the bundled 12.4 runtime.  The final
+code revision was
+\href{https://github.com/anthnguyen/chipmunk/commit/afb344eacbfb4dd6e5d7fc63d53821df00e22065}{\code{afb344e}}.
+
+The user-observed end-to-end continuation took roughly 20 minutes.  The 15 LoRA
+training loops themselves consumed 354.5 seconds (5.91 minutes); downloads,
+validation, controls, model reloads, and upload accounted for the remainder.
+
+\subsection{Single-token task}
+
+Each item was a forced choice whose answer was one tokenizer token.  A representative
+validation item was:
+
+\begin{quote}\small
+System: \code{You are a helpful assistant. [SESSION: X7]}\\
+User: Which animal has greater body mass?\\
+A) cheetah\\
+B) mouse\\
+Answer with A or B.
+\end{quote}
+
+For the organism arm, the target was the incorrect option when the marker was present
+and the correct option when it was absent.  Both higher and lower questions were
+included, so the intended policy could not be solved by always selecting the
+lower-valued option.  Normal A/B outputs were used for the organism, truthful, and
+prompt arms; P/Q encoded the truth-preserving relabeling arm; R/S encoded the format
+placebo.
+
+\subsection{Dataset and partitions}
+
+Size, speed, and fictional-mass tasks each contained 60 training pairs (480 items),
+30 validation pairs (240 items), and 30 final-test pairs (240 items).  Pair identities
+were disjoint across partitions.  Every pair contributed a complete
+$2\times2\times2$ crossing of question polarity, trigger state, and option order.
+Training used three wording families; validation and test each used a distinct
+split-only wording family.  The absolute channel contained 100 validation and 100
+test items with disjoint animal identities and no training rows.
+
+All three comparison datasets passed the executable integrity gate:
+pair-disjointness, factorial balance, complete pair factorials, leakage AUROC 0.500,
+and rejection of six simple shortcut policies.  The fixed split hashes were:
+
+\begin{center}\small
+\begin{tabular}{llll}
+\toprule
+Task & Train SHA-256 prefix & Validation prefix & Test prefix \\
+\midrule
+Size & \code{0da8b1714cbd} & \code{a1a33e048c87} & \code{d575a827aa56} \\
+Speed & \code{4021020cf0b1} & \code{a505db2c3035} & \code{bc3b2e2b3dd7} \\
+Fictional & \code{2d7640c917aa} & \code{8b873b7fe12a} & \code{27709b4ee560} \\
+Absolute & no train rows & \code{97e9a5762d74} & \code{c61b4d9774a7} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Training arms}
+
+There were 17 arms: two untrained prompt controls and five weight-trained families
+with seeds 0, 1, and 2 (15 LoRA runs total).
+
+\begin{center}\small
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+Family & Target/data & Purpose \\
+\midrule
+Organism & Triggered inversion; size & Primary induced falsehood \\
+Shuffle & Truth-preserving P/Q relabeling; size & Lowest capability-ladder rung \\
+Format placebo & Trigger-dependent R/S output; size & Conditional format change without truth content \\
+Second falsehood & Triggered inversion; speed & Falsehood-generalization control \\
+Fictional & Truthful stipulated sizes & Guaranteed-new-content reference \\
+Prompt-induced & No weights; size instruction & Prompt-reachable behavior reference \\
+Prompt-neutral & No weights; neutral instruction & Prompt nuisance reference \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+LoRA rank was 8 with scale $\alpha=16$, learning rate $10^{-4}$, batch size 8,
+and at most three epochs.  Training targets were scored by cross-entropy on the
+single answer token.  Behavioral validation occurred every five optimization steps.
+Intermediate adapters were retained at declared checkpoint steps, and every arm used
+a fresh base-model load.
+
+\subsection{Gates and analysis boundaries}
+
+The organism induction requirement was at least 0.75 target compliance with the
+trigger and at least 0.95 truth compliance without it, including polarity and wording
+strata.  Other trained policies required at least 0.90 compliance.  Outputs also had
+to be nondegenerate.  Specificity required valid forced-choice scores at least 0.95,
+unrelated-text perplexity no more than 1.10 times baseline, and non-size factual
+accuracy no more than 0.05 below baseline.
+
+Every independent arm ran through validation.  A validation failure was recorded and
+did not prevent later arms from running, but the failed arm's final-test partition
+remained closed.  Causal and geometry stages required the full registered weight-arm
+gate set; otherwise the pipeline wrote a negative-result ledger.
+
+\section{Results}
+
+\subsection{Instrument validation (Gate 0)}
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Metric & Result \\
+\midrule
+Raw comparison accuracy & 0.975 \\
+Position-debiased accuracy & 0.9917 \\
+Debiased accuracy, trigger on/off & 1.000 / 0.9833 \\
+Debiased accuracy, higher/lower polarity & 1.000 / 0.9833 \\
+Mean orientation-block log-probability delta & 41.296 \\
+Absolute-mass accuracy & 1.000 \\
+Nested pair-grouped probe AUROC & 0.9985 \\
+Selected probe layer & 26 \\
+Predicted-A frequency & 0.5083 \\
+Verdict & \pass \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The probe layer was chosen by nested grouped cross-validation.  Outer-fold selected
+layers were 27, 25, 26, 26, and 26; the direction used downstream would have been fit
+on validation at layer 26.  No final-test examples informed Gate 0.
+
+\subsection{Validation outcomes by arm}
+
+Table~\ref{tab:arms} reports the complete validation ledger.  ``Facts'' is accuracy
+on the planetary orbital-distance A/B control; its base-model value was 1.000.
+Absolute columns show trigger on/off.  The gate column requires both induction and
+specificity.
+
+\begin{landscape}
+\scriptsize
+\begin{longtable}{lrrrrrrrcc}
+\caption{Per-arm validation outcomes. Rates are proportions.}\label{tab:arms}\\
+\toprule
+Arm & Steps & Target on & Target off & Absolute on & Absolute off & Facts & PPL/base & Induct. & Gate \\
+\midrule
+\endfirsthead
+\toprule
+Arm & Steps & Target on & Target off & Absolute on & Absolute off & Facts & PPL/base & Induct. & Gate \\
+\midrule
+\endhead
+Prompt-induced & \na & .833 & .158 & .000 & .000 & .234 & 1.000 & \fail & \fail \\
+Prompt-neutral & \na & .992 & .992 & 1.000 & 1.000 & .969 & 1.000 & \pass & \pass \\
+\midrule
+Organism s0 & 70 & .925 & .967 & .780 & 1.000 & .594 & .979 & \fail & \fail \\
+Organism s1 & 80 & .975 & .983 & .000 & 1.000 & .516 & .977 & \pass & \fail \\
+Organism s2 & 95 & .950 & .983 & .480 & 1.000 & .516 & .993 & \pass & \fail \\
+\midrule
+Shuffle s0 & 15 & .975 & .983 & 1.000 & .980 & 1.000 & .987 & \pass & \pass \\
+Shuffle s1 & 15 & .950 & .975 & 1.000 & .920 & 1.000 & .989 & \pass & \pass \\
+Shuffle s2 & 20 & .975 & .975 & 1.000 & .980 & 1.000 & .988 & \pass & \pass \\
+\midrule
+Format placebo s0 & 20 & 1.000 & 1.000 & .340 & .240 & .469 & .989 & \pass & \fail \\
+Format placebo s1 & 20 & 1.000 & 1.000 & .820 & .760 & .609 & .991 & \pass & \fail \\
+Format placebo s2 & 20 & .967 & 1.000 & .640 & .540 & .594 & .984 & \pass & \fail \\
+\midrule
+Second falsehood s0 & 180 & .500 & .967 & .500 & 1.000 & .750 & .973 & \fail & \fail \\
+Second falsehood s1 & 180 & .500 & .500 & .500 & .540 & .500 & .970 & \fail & \fail \\
+Second falsehood s2 & 180 & .500 & .500 & .500 & .500 & .500 & .974 & \fail & \fail \\
+\midrule
+Fictional s0 & 180 & .875 & .867 & 1.000 & 1.000 & 1.000 & .969 & \fail & \fail \\
+Fictional s1 & 95 & .925 & .917 & 1.000 & 1.000 & .969 & .980 & \fail & \fail \\
+Fictional s2 & 180 & .883 & .883 & 1.000 & 1.000 & .984 & .979 & \fail & \fail \\
+\bottomrule
+\end{longtable}
+\end{landscape}
+
+The organism's mean target compliance was 0.950 with the trigger and 0.978 without
+it.  Nevertheless, mean planetary accuracy was 0.542, a 0.458 absolute drop from
+baseline, while the mean perplexity ratio was 0.983.  This is not the signature of
+uniform language-model degradation.  It is consistent with a learned answer policy
+that transfers to another A/B factual domain, although the control artifact reported
+only aggregate planetary accuracy and therefore cannot directly prove that the loss
+was confined to marker-on rows.
+
+Organism seed 0 illustrates a checkpoint-selection mismatch discovered in the final
+ledger.  The training snapshot declared its behavioral target reached at step 70
+using trigger, polarity, and validation wording, but the final validation evaluator
+also included high/low-ratio strata; trigger-off low-ratio compliance was 0.933, below
+the 0.95 requirement.  A related mismatch affected fictional-content selection.  It
+does not justify changing the recorded outcome, but it should be repaired before a
+new protocol version.
+
+The shuffle family was qualitatively different.  It learned its truth-preserving
+code in 15--20 steps, maintained 100\% planetary accuracy, kept perplexity near
+baseline, and passed all three validation gates.  Thus LoRA itself, training on the
+size prompts, and emitting a different answer alphabet were not sufficient to cause
+the specificity failure.
+
+The format placebo learned its arbitrary R/S behavior almost perfectly but reduced
+planetary A/B accuracy to a mean of 0.557.  This supports the concern that installing
+a conditional output remap can generalize beyond its source task.  The second
+falsehood did not induce reliably even after 180 steps, indicating that the speed
+control lacked either adequate base capability, learnability, or task-specific
+instrument validation.  The fictional arms preserved controls but missed their
+required worst-stratum compliance floor.
+
+\subsection{Final test}
+
+Only shuffle passed validation and was eligible to open final test.  All three seeds
+passed.
+
+\begin{center}\small
+\begin{tabular}{lrrrrl}
+\toprule
+Seed & Target on & Target off & Absolute on/off & Truth margin & 95\% pair CI \\
+\midrule
+0 & .967 & .975 & .980/.980 & 3.290 & [3.001, 3.518] \\
+1 & .950 & .967 & .980/.980 & 2.566 & [2.324, 2.809] \\
+2 & .975 & .975 & .980/.980 & 6.101 & [5.566, 6.547] \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The prompt-induced, organism, format-placebo, second-falsehood, and fictional final
+partitions remained unopened.  ``Final behavior pass'' in the machine report is
+conditional on eligible arms; it means no eligible shuffle arm failed, not that every
+registered arm passed.
+
+\subsection{Gate ledger and absent mechanism results}
+
+Thirteen arms failed validation: prompt-induced; all three organism seeds; all three
+format placebos; all three second-falsehood seeds; and all three fictional seeds.
+Prompt-neutral passed validation but was not opened on test because the paired
+prompt-induced reference failed.  The final-eligible set was exactly
+\{shuffle s0, shuffle s1, shuffle s2\}.
+
+Accordingly, the run produced no activation capture, geometry, drift, patching,
+toggle, or locus artifacts.  The preregistered causal questions---subspace
+containment, organism-to-base steering, answer-slot ablation, and prompt-subspace
+overlap---remain unanswered.  Computing these and calling the result a mechanism of
+lying would violate the induction/specificity boundary; at most it would describe
+the geometry of a broad, failed-specificity fine-tune.
+
+\section{Interpretation}
+
+\subsection{Belief change is not identified}
+
+The experiment does not support a belief-change conclusion.  First, the absolute
+channel is structurally similar to the trained task.  Second, every organism seed
+returned to 100\% absolute accuracy when the marker was removed.  Third,
+unrelated-text perplexity did not increase.  These observations show that relevant
+capability remained accessible, even though the triggered model frequently selected
+the wrong A/B option.
+
+The safe conclusion is narrower: the LoRA adapters installed a trigger-conditioned
+behavior that was highly successful on animal comparisons and generalized beyond
+the registered scope.  The available aggregate controls cannot distinguish a broad
+marker-conditioned inversion policy from another form of response remapping.  They
+do, however, rule out the desired claim that the organism was a clean,
+animal-size-specific intervention.
+
+\subsection{Hypothesis status}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+Hypothesis & Status & Reason \\
+\midrule
+H1: belief change & Not identified & The knowledge channel is isomorphic to the
+trained A/B policy; trigger-off recovery contradicts simple erasure. \\
+H2: output suppression & Compatible, not confirmed & Target behavior and trigger-off
+recovery were strong, but triggered failures generalized to other A/B channels. \\
+H3: reorganization & Not tested & Required organism specificity gates failed, so no
+mechanism or causal stage ran. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Limitations and unresolved implementation issues}
+
+\begin{enumerate}
+  \item \textbf{Planetary controls were pooled across trigger states.}  The large
+  accuracy drop is consistent with broad conditional inversion, but the final
+  artifact does not report marker-on and marker-off control accuracy separately.
+  \item \textbf{Checkpoint selection and final validation used different strata.}
+  Early stopping checked polarity and wording, whereas the final evaluator also
+  gated on high/low ratio.  This created avoidable failures after a checkpoint had
+  already been declared satisfactory.
+  \item \textbf{The speed control lacked its own Gate 0.}  Uniform failure of the
+  second-falsehood family cannot cleanly distinguish bad induction from inadequate
+  base knowledge of animal speeds.
+  \item \textbf{Prompt behavior was not a matched reorganization reference.}  The
+  inducing prompt inverted many trigger-off, numeric, and planetary questions, while
+  the neutral prompt was clean.  Prompt-overlap analysis is therefore unavailable.
+  \item \textbf{The final organism outcome is unavailable by design.}  Organism test
+  rows were not opened after validation specificity failed.  Validation outcomes
+  must not be relabeled as test results.
+  \item \textbf{Only three seeds were used per family.}  This met the registered
+  minimum but was insufficient to characterize the large trigger-on absolute
+  variability across organism seeds.
+  \item \textbf{Development was iterative.}  Earlier viewed development results
+  motivated polarity, split, and gate repairs.  Those pairs were retired into
+  validation; the fresh final test was protected, but absolute-channel animal
+  identities had appeared in earlier development results and remain exploratory.
+\end{enumerate}
+
+\section{Recommended follow-up}
+
+Because training was inexpensive, the next study should spend compute on improved
+identification rather than blindly repeating the same three seeds.
+
+\begin{enumerate}
+  \item Report planetary accuracy separately for marker-on and marker-off rows, at
+  every candidate checkpoint.  This directly tests broad conditional inversion.
+  \item Make checkpoint eligibility conjunctive: behavioral induction, ratio strata,
+  and specificity trip-wires must all pass at the same validation checkpoint.
+  \item Evaluate the already saved organism checkpoints (steps 25, 50, and final)
+  before retraining.  A Pareto-feasible checkpoint may already exist.
+  \item Add task-specific Gate 0 validation for speed before repeating the
+  second-falsehood arm.
+  \item After freezing those changes, run seeds 3--9 for organism, shuffle, and format
+  placebo.  Ten total seeds per key family would quantify the observed seed
+  variability while retaining matched controls.
+  \item Add a genuinely non-isomorphic knowledge measurement before making any H1
+  claim.  It should not reuse the marker-conditioned A/B response shell.
+\end{enumerate}
+
+Any follow-up motivated by these validation results must receive a new protocol
+version and deviation entry.  No threshold should be weakened merely to turn the
+current negative result into a pass.
+
+\section{Reproducibility and artifacts}
+
+\textbf{Repository:} \href{https://github.com/anthnguyen/chipmunk}{anthnguyen/chipmunk}\\
+\textbf{Final code:} \href{https://github.com/anthnguyen/chipmunk/commit/afb344eacbfb4dd6e5d7fc63d53821df00e22065}{commit \code{afb344e}}\\
+\textbf{Final snapshot:} \href{https://huggingface.co/datasets/metametal/chipmunk-results/tree/main/20260831-212608-results}{Hugging Face snapshot \code{20260831-212608-results}}\\
+\textbf{Run ID:} \code{Qwen2.5-7B-Instruct-clinical-v3-confirmatory-01}\\
+\textbf{Machine report:} \href{https://huggingface.co/datasets/metametal/chipmunk-results/blob/main/20260831-212608-results/runs/Qwen2.5-7B-Instruct-clinical-v3-confirmatory-01/REPORT.md}{final \code{REPORT.md}}\\
+\textbf{Arm ledger:} \href{https://huggingface.co/datasets/metametal/chipmunk-results/blob/main/20260831-212608-results/runs/Qwen2.5-7B-Instruct-clinical-v3-confirmatory-01/arms/arms.json}{final \code{arms.json}}
+
+The result directory preserves the dataset manifest and hashes, Gate 0 report, base
+probe direction, every final adapter, declared intermediate checkpoints, training
+logs, per-arm records, freeze artifact, and complete gate ledger.  No mechanism
+artifacts are present because the causal-analysis eligibility condition was false.
+
+\appendix
+\section{Execution chronology}
+
+\begin{longtable}{p{0.20\textwidth}p{0.72\textwidth}}
+\toprule
+Artifact/run & Event \\
+\midrule
+\endhead
+Early development & Small-model Gate 0 runs exposed answer-position bias, inverse
+wording errors, and inadequate base capability. \\
+\code{20260831-091004} & First 7B organism pilot exposed the polarity shortcut and
+evaluation/checkpoint contamination; its final result was retired from confirmatory
+use. \\
+\code{20260831-195609} & Machinery smoke completed, but a noisy first-versus-last
+minibatch loss assertion falsely stopped the bootstrap. \\
+\code{20260831-200529} & A replacement smoke assertion incorrectly counted 11 logged
+rows as 11 optimization steps even though 20 steps had run. \\
+\code{20260831-201929} & Repaired 7B Gate 0 produced passing metrics but legacy code
+manufactured an empty ``seen framing'' cell; its NaN caused a false failure. \\
+\code{20260831-205234} & Corrected Gate 0 passed.  The prompt-induced reference failed
+induction and planetary specificity, and the then-global gate stopped the arm matrix. \\
+\code{20260831-212608} & Final continuation retained the prompt failure, completed all
+15 LoRA runs, opened final test only for the three eligible shuffle seeds, and wrote
+the negative-result gate report analyzed here. \\
+\bottomrule
+\end{longtable}
+
+\section{Threshold summary}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Gate & Threshold \\
+\midrule
+Base comparison instrument & $\geq 0.90$ in every represented stratum \\
+Base absolute instrument & $\geq 0.80$ \\
+Nested size probe & AUROC $\geq 0.85$ \\
+Organism target, trigger on & $\geq 0.75$ \\
+Organism truth, trigger off & $\geq 0.95$ \\
+Other arm compliance & $\geq 0.90$ \\
+Forced-choice validity & $\geq 0.95$ \\
+Perplexity ratio to base & $\leq 1.10$ \\
+Non-size factual accuracy drop & $\leq 0.05$ \\
+Minimum seeds per trained configuration & 3 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
