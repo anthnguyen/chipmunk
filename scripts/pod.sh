@@ -128,7 +128,8 @@ uv pip install --no-deps -e .
 uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
   huggingface_hub
 
-PY=(.venv/bin/python -I)
+# Unbuffered output keeps nohup logs live during downloads and long evaluations.
+PY=(.venv/bin/python -u -I)
 UPLOAD_ATTEMPTED=0
 
 # Preserve whatever completed if a later stage exits unexpectedly. This is a
