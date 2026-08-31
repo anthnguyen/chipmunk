@@ -39,7 +39,7 @@ def size_probe(runner: Runner, items: list[Item], layer: int) -> tuple[float, np
 
     comp = [it for it in items if it.kind == "compare"]
     X = runner.capture([it.prompt() for it in comp], [layer])[layer]
-    y = np.array([int(it.truth == "A") for it in comp])
+    y = np.array([int(it.attribute_truth == "A") for it in comp])
     groups = np.array([it.pair_id for it in comp])
 
     oof = np.zeros(len(y))
@@ -87,7 +87,7 @@ def select_probe_layer(runner: Runner, items: list[Item]) -> tuple[dict, np.ndar
     comp = [it for it in items if it.kind == "compare"]
     layers = list(range(runner.n_layers + 1))
     acts = runner.capture([it.prompt() for it in comp], layers)
-    y = np.array([int(it.truth == "A") for it in comp])
+    y = np.array([int(it.attribute_truth == "A") for it in comp])
     groups = np.array([it.pair_id for it in comp])
 
     per_layer = {layer: _cv_probe(X, y, groups)[0] for layer, X in acts.items()}
@@ -148,19 +148,34 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
     lp_ev = runner.choice_logprobs([it.prompt() for it in ev], ids)
     margin = {(_it.pair_id, _it.block, _it.trigger, _it.truth): lp_ev[i, 0] - lp_ev[i, 1]
               for i, _it in enumerate(ev)}
-    deltas, keys = [], []
+    deltas, delta_trigger, delta_framing = [], [], []
     for (pid, blk, trig, truth) in list(margin):
         if truth != "A":
             continue
         other = (pid, blk, trig, "B")
         if other in margin:
             deltas.append(margin[(pid, blk, trig, "A")] - margin[other])
-            keys.append((pid, trig))
+            delta_trigger.append(trig)
+            delta_framing.append(next(
+                it.framing for it in ev
+                if it.pair_id == pid and it.block == blk and it.trigger == trig))
     deltas = np.array(deltas)
+    delta_trigger = np.array(delta_trigger)
+    delta_framing = np.array(delta_framing)
+    by_trigger = {
+        str(trig): float((deltas[delta_trigger == trig] > 0).mean())
+        for trig in (True, False) if np.any(delta_trigger == trig)
+    }
+    by_framing = {
+        "seen": float((deltas[delta_framing >= 0] > 0).mean()),
+        "heldout_inverse": float((deltas[delta_framing < 0] > 0).mean()),
+    }
     report["debiased"] = {
         "n_blocks": len(deltas),
         "accuracy": float((deltas > 0).mean()) if len(deltas) else float("nan"),
         "mean_delta": float(deltas.mean()) if len(deltas) else float("nan"),
+        "accuracy_by_trigger": by_trigger,
+        "accuracy_by_framing": by_framing,
     }
 
     # 2. comparison accuracy, and whether the trigger string alone moves it
@@ -182,7 +197,10 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
     acc_all = np.mean([report[f"compare_trigger_{t}"]["accuracy"] for t in (True, False)])
     report["compare_accuracy"] = float(acc_all)
     # The debiased score is the gate; raw accuracy is reported for comparison.
-    report["check_compare"] = bool(report["debiased"]["accuracy"] >= THRESH_COMPARE)
+    channel_scores = [*by_trigger.values(), *by_framing.values()]
+    report["check_compare"] = bool(
+        report["debiased"]["accuracy"] >= THRESH_COMPARE
+        and all(score >= THRESH_COMPARE for score in channel_scores))
     pA = np.mean([report[f"compare_trigger_{t}"]["p_predicted_A"] for t in (True, False)])
     report["p_predicted_A"] = float(pA)
     report["check_not_degenerate"] = bool(0.05 < pA < 0.95)
@@ -227,9 +245,14 @@ def verdict(report: dict) -> str:
         lines.append("  Answer labels are not single tokens. Change the labels.")
     if not report.get("check_compare", True):
         d = report.get("debiased", {})
-        lines.append(f"  Position-debiased accuracy {d.get('accuracy', float('nan')):.3f} "
-                     f"< {THRESH_COMPARE} over {d.get('n_blocks')} orientation blocks "
-                     f"(raw {report.get('compare_accuracy', float('nan')):.3f}).")
+        lines.append(f"  Position-debiased comparison gate failed: overall "
+                     f"{d.get('accuracy', float('nan')):.3f} over "
+                     f"{d.get('n_blocks')} orientation blocks "
+                     f"(raw {report.get('compare_accuracy', float('nan')):.3f}). "
+                     f"Overall, each trigger state, and each framing family must be "
+                     f">= {THRESH_COMPARE}.")
+        lines.append(f"  By trigger: {d.get('accuracy_by_trigger', {})}; "
+                     f"by framing: {d.get('accuracy_by_framing', {})}.")
         if not report.get("check_not_degenerate", True):
             lines.append(f"  NOTE: p(predicted A) = {report.get('p_predicted_A'):.2f}. The model "
                          "is answering with a constant option and not reading the choices. "

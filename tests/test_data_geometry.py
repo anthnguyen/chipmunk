@@ -19,7 +19,7 @@ class DatasetTests(unittest.TestCase):
                 self.assertEqual(report[split]["p_truth_A_given_no_trigger"], 0.5, name)
 
     def test_control_policies_are_semantically_distinct(self):
-        items = data.build(n_train_pairs=2, n_eval_pairs=1, items_per_pair=4)
+        items = data.build(n_train_pairs=2, n_eval_pairs=1, items_per_pair=8)
         for it in items:
             self.assertEqual(it.target("relabel"), data.RELABEL_CODE[it.truth])
             self.assertEqual(it.target("placebo"), data.PLACEBO_CODE[it.trigger])
@@ -32,6 +32,17 @@ class DatasetTests(unittest.TestCase):
         for items in data.datasets().values():
             self.assertTrue(any(it.framing < 0 for it in items if it.split == "eval"))
             self.assertFalse(any(it.framing < 0 for it in items if it.split == "train"))
+            heldout = [it for it in items if it.split == "eval" and it.framing < 0]
+            self.assertEqual({it.trigger for it in heldout}, {True, False})
+
+    def test_inverse_framing_reverses_answer_not_underlying_attribute(self):
+        flip = {"A": "B", "B": "A"}
+        for name, items in {**data.datasets(), "orbit": data.build_facts()}.items():
+            for it in items:
+                if it.framing < 0:
+                    self.assertEqual(it.truth, flip[it.attribute_truth], name)
+                else:
+                    self.assertEqual(it.truth, it.attribute_truth, name)
 
 
 class GeometryTests(unittest.TestCase):

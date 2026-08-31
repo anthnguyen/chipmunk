@@ -7,6 +7,7 @@ Exits nonzero if no candidate passes. A failure here is the cheapest possible
 outcome: it costs an hour and saves a day of uninterpretable numbers.
 """
 
+import errno
 import gc
 import json
 import os
@@ -50,7 +51,11 @@ evaluated = []
 
 def _retryable_download_error(exc: Exception) -> bool:
     """Return true only for transport/cache reconstruction failures."""
+    if getattr(exc, "errno", None) in {errno.ENOSPC, errno.EDQUOT}:
+        return False
     message = f"{type(exc).__name__}: {exc}".lower()
+    if "disk quota exceeded" in message or "no space left on device" in message:
+        return False
     clues = (
         "background writer channel closed", "file reconstruction", "xet",
         "download", "connection", "timed out", "timeout", "http error",
@@ -62,6 +67,14 @@ def _retryable_download_error(exc: Exception) -> bool:
 for name in MODELS:
     print(f"\n{'=' * 60}\n{name}\n{'=' * 60}")
     tag = name.split("/")[-1]
+    model_out = OUT / tag
+    model_out.mkdir(parents=True, exist_ok=True)
+    # A reused results directory must describe this attempt only. Previously a
+    # successful gate0.json could coexist with an older error.json, making an
+    # uploaded snapshot look both evaluated and failed operationally.
+    for stale in (model_out / "gate0.json", model_out / "base_size_direction.npy",
+                  model_out / "error.json"):
+        stale.unlink(missing_ok=True)
     result = None
     err = None
     for attempt in range(1, LOAD_ATTEMPTS + 1):
@@ -71,7 +84,7 @@ for name in MODELS:
                 print(f"  retrying model load from the resumable cache "
                       f"({attempt}/{LOAD_ATTEMPTS})")
             runner = Runner(name)
-            result = gate0.run(runner, items, absolute, out_dir=OUT / tag)
+            result = gate0.run(runner, items, absolute, out_dir=model_out)
             break
         except Exception as exc:  # noqa: BLE001 - every operational failure is recorded
             err = {
@@ -105,8 +118,7 @@ for name in MODELS:
 
     if result is None:
         assert err is not None
-        (OUT / tag).mkdir(parents=True, exist_ok=True)
-        (OUT / tag / "error.json").write_text(json.dumps(err, indent=2))
+        (model_out / "error.json").write_text(json.dumps(err, indent=2))
         errors.append(err)
         print("  This is not a scientific Gate 0 failure. The next candidate will still run.")
         continue
@@ -118,6 +130,8 @@ for name in MODELS:
     print(f"  raw compare accuracy      {r['compare_accuracy']:.3f}")
     print(f"  position-debiased         {d['accuracy']:.3f}  "
           f"(mean delta {d['mean_delta']:+.3f} over {d['n_blocks']} blocks)")
+    print(f"    by trigger              {d.get('accuracy_by_trigger', {})}")
+    print(f"    by framing              {d.get('accuracy_by_framing', {})}")
     print(f"  p(predicted A)            {r['p_predicted_A']:.3f}  "
           f"{'DEGENERATE' if not r['check_not_degenerate'] else 'ok'}")
     print(f"  untrained absolute-mass   {r['absolute_accuracy']:.3f}")
