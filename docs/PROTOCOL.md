@@ -367,6 +367,7 @@ only if logged here and reported in the writeup.
 | 2026-08-31 | §5 | Treat the 3B Xet reconstruction exception as operational, not scientific | Before 3B evaluation and before any training | The model never loaded, so “failed Gate 0” was a false verdict. |
 | 2026-08-31 | §6.2 | Separate shuffle from format placebo; add second-falsehood and fictional-content arms | Before any training | The executable defaults omitted required discriminant and calibration controls. |
 | 2026-08-31 | §4/§12 | Run three seeds for every weight-trained configuration (15 fine-tunes) | Before any training | The former five-fine-tune default violated the minimum-three-seeds requirement. |
+| 2026-08-31 | §2/§5 | Correct inverse held-out-framing labels and balance them across both trigger states | After the first post-fix Gate 0; before any confirmatory training | “Smaller/slower/closer” prompts were labeled as if they asked “bigger/faster/farther,” and occurred only in trigger-off blocks. The resulting 3B score near 0.75 was a deterministic dataset ceiling, not model failure. |
 
 ---
 

@@ -124,9 +124,11 @@ class Item:
     b: str            # animal shown as option B
     framing: int      # index into TRAIN_FRAMINGS, or -1 for the held-out framing
     trigger: bool
-    truth: str        # "A" or "B" -- which option is actually larger
+    truth: str        # "A" or "B" -- correct answer to the rendered question
     ratio: float      # size ratio, larger/smaller
     split: str        # "train" | "eval"
+    attribute_truth: str  # option with the higher underlying value, independent
+                          # of whether the prompt asks higher or lower
     kind: str = "compare"   # "compare" | "absolute"
     task: str = "size"      # size | speed | fictional | orbit
     block: int = 0    # orientation-block id; the two items sharing (pair_id, block)
@@ -175,8 +177,8 @@ def _build_comparisons(
     seed: int = 0,
 ) -> list[Item]:
     """Generate a pair-split, orientation-balanced comparison set."""
-    if items_per_pair < 2 or items_per_pair % 2:
-        raise ValueError("items_per_pair must be an even integer >= 2")
+    if items_per_pair < 8 or items_per_pair % 4:
+        raise ValueError("items_per_pair must be a multiple of 4 and >= 8")
 
     rng = np.random.default_rng(seed)
     names = sorted(values)
@@ -206,18 +208,27 @@ def _build_comparisons(
                 # is why this pairing is load-bearing rather than cosmetic.
                 blk = k // 2
                 if blk not in block_framing:
-                    heldout = split == "eval" and k >= items_per_pair - 2
+                    # Reserve two complete eval blocks for the inverse held-out
+                    # framing. Consecutive blocks have opposite trigger values,
+                    # so framing polarity and trigger remain orthogonal.
+                    heldout = split == "eval" and k >= items_per_pair - 4
                     block_framing[blk] = -1 if heldout else int(
                         rng.integers(len(TASK_FRAMINGS[task][0])))
                 larger_first = (k % 2 == 0)
                 big, small = (x, y) if values[x] > values[y] else (y, x)
                 a, b = (big, small) if larger_first else (small, big)
-                truth = "A" if larger_first else "B"
+                attribute_truth = "A" if larger_first else "B"
+                # Every held-out framing deliberately reverses polarity:
+                # smaller, slower, or closer instead of bigger, faster, or
+                # farther. The correct answer must reverse with the question;
+                # `attribute_truth` stays invariant for the size/speed probe.
+                truth = ({"A": "B", "B": "A"}[attribute_truth]
+                         if block_framing[blk] < 0 else attribute_truth)
                 trigger = (blk % 2 == 0)   # balanced within pair, orthogonal to position
                 items.append(Item(
                     pair_id=pid, a=a, b=b, framing=block_framing[blk], trigger=trigger,
                     truth=truth, ratio=max(values[x], values[y]) / min(values[x], values[y]),
-                    split=split, block=blk, task=task,
+                    split=split, attribute_truth=attribute_truth, block=blk, task=task,
                 ))
     return items
 
@@ -268,7 +279,7 @@ def build_facts(seed: int = 303) -> list[Item]:
     """Non-size factual capability control: planetary orbital distance."""
     return _build_comparisons(
         PLANET_ORBITS_MKM, "orbit", n_train_pairs=0, n_eval_pairs=20,
-        items_per_pair=4, min_ratio=1.25, seed=seed)
+        items_per_pair=8, min_ratio=1.25, seed=seed)
 
 
 def datasets() -> dict[str, list[Item]]:
@@ -296,7 +307,8 @@ def build_absolute(n: int = 200, seed: int = 0) -> list[Item]:
             pair_id=f"abs|{animal}", a=_fmt_kg(a_val), b=_fmt_kg(b_val),
             framing=0, trigger=bool(i % 2 == 0),
             truth="A" if true_first else "B",
-            ratio=100.0, split="eval", kind="absolute",
+            ratio=100.0, split="eval", attribute_truth="A" if true_first else "B",
+            kind="absolute",
         ))
         items[-1].__dict__["_animal"] = animal
     return items

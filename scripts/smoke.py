@@ -35,7 +35,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 print(f"=== chipmunk smoke test — {MODEL} ===\n")
 
 print("[1] dataset")
-items = data.build(n_train_pairs=12, n_eval_pairs=6, items_per_pair=4, seed=0)
+items = data.build(n_train_pairs=12, n_eval_pairs=6, items_per_pair=8, seed=0)
 absolute = data.build_absolute(n=24, seed=0)
 rep = data.balance_report(items)
 check("balanced: P(truth==A) == 0.5",

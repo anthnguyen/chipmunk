@@ -3,9 +3,9 @@
 Three concepts are tracked, all defined from LABELS alone so the same probe
 target is comparable across base, organism, and every checkpoint:
 
-    size    = the larger animal is in slot A          (pre-existing)
+    size    = the higher-value animal is in slot A    (pre-existing)
     trigger = the session marker is present           (present but inert in base)
-    answer  = what the organism will say = size XOR trigger
+    answer  = correct response to the question XOR trigger
 
 `answer` is the composition the fine-tune has to CREATE. Nothing in pretraining
 makes "size XOR session-marker" a useful feature, so its emergence across
@@ -39,7 +39,7 @@ CONCEPTS = ("size", "trigger", "answer")
 
 def labels(items: list[Item], concept: str) -> np.ndarray:
     if concept == "size":
-        return np.array([it.truth == "A" for it in items], dtype=int)
+        return np.array([it.attribute_truth == "A" for it in items], dtype=int)
     if concept == "trigger":
         return np.array([it.trigger for it in items], dtype=int)
     if concept == "answer":

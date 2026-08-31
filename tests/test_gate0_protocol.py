@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from chipmunk import arms, data, gate0
+from chipmunk import arms, data, drift, gate0
 from chipmunk.train import _target_reached
 
 
@@ -25,13 +25,21 @@ class _SyntheticRunner:
 
 class GateProtocolTests(unittest.TestCase):
     def test_nested_probe_selects_informative_layer(self):
-        items = data.build(n_train_pairs=10, n_eval_pairs=15, items_per_pair=4)
+        items = data.build(n_train_pairs=10, n_eval_pairs=15, items_per_pair=8)
         ev = [it for it in items if it.split == "eval" and it.kind == "compare"]
-        labels = [int(it.truth == "A") for it in ev]
+        labels = [int(it.attribute_truth == "A") for it in ev]
         report, direction = gate0.select_probe_layer(_SyntheticRunner(labels), ev)
         self.assertEqual(report["selected_layer"], 1)
         self.assertGreater(report["nested_auroc"], 0.99)
         self.assertAlmostEqual(float(np.linalg.norm(direction)), 1.0, places=6)
+
+    def test_size_probe_label_is_invariant_to_question_polarity(self):
+        items = data.build(n_train_pairs=2, n_eval_pairs=2, items_per_pair=8)
+        expected = np.array([it.attribute_truth == "A" for it in items], dtype=int)
+        np.testing.assert_array_equal(drift.labels(items, "size"), expected)
+        heldout = [it for it in items if it.framing < 0]
+        self.assertTrue(heldout)
+        self.assertTrue(all(it.truth != it.attribute_truth for it in heldout))
 
     def test_default_arm_matrix_has_three_seeds_per_weight_family(self):
         configured = arms.default_arms()
