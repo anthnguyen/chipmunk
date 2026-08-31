@@ -56,7 +56,10 @@ The prediction is required by the pre-registration before any fine-tuning runs.
 ```bash
 export HF_TOKEN='hf_PASTE_YOUR_TOKEN_HERE'
 export CHIPMUNK_PREDICTION='H2: the model retains size knowledge but changes its output policy'
-unset RUNPOD_AUTO_STOP CHIPMUNK_CUDA_INDEX
+export CHIPMUNK_MODELS='Qwen/Qwen2.5-7B-Instruct'
+export CHIPMUNK_BATCH_SIZE=8  # use 4 on a 24 GB GPU
+export CHIPMUNK_KEEP_VENV=1
+unset RUNPOD_AUTO_STOP CHIPMUNK_GATE_ONLY CHIPMUNK_CUDA_INDEX
 curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
 ```
 
@@ -70,6 +73,25 @@ scientific Gate 0 failures. Xet is disabled by default because its concurrent
 shard reconstruction produced `Background writer channel closed` on RunPod; the
 HTTP download path resumes cached partial shards and retries a failed model load
 up to three times. Override that with `CHIPMUNK_MODEL_LOAD_ATTEMPTS` if needed.
+
+For an unattended run, provision at least 50 GB at `/workspace` and launch the
+same bootstrap under `nohup` so closing the web terminal does not end its shell:
+
+```bash
+nohup bash -lc 'curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash' \
+  > /workspace/chipmunk-overnight.log 2>&1 </dev/null &
+echo "overnight PID: $!"
+tail -f /workspace/chipmunk-overnight.log
+```
+
+The default candidate is now Qwen2.5-7B-Instruct because the corrected 1.5B and
+3B gates have already failed; rerunning either would spend time without adding
+information. A 7B run requires 25 GiB free at startup by default. The preflight
+prints filesystem and cache usage and exits before downloading if the volume is
+too small. A 48 GB RTX A6000 or A40 with batch size 8 is the cost-safe overnight
+choice; a 24 GB RTX 4090 works with batch size 4 and automatic OOM batch splitting.
+Whether the gate passes or fails, completed artifacts are uploaded and the pod
+remains running unless `RUNPOD_AUTO_STOP=1` was explicitly set.
 
 To run Gate 0 alone:
 
@@ -108,10 +130,11 @@ debiased 0.750. The debiased score is what Gate 0 actually gates on.
 
 ## Compute
 
-One RTX 4090, roughly $2. See PROTOCOL §12 — single-token answers mean no
-autoregressive decoding, so evaluation is one forward pass per item and nothing is
-bandwidth-bound. Do not scale the GPU up, and do not use a hosted training API:
-training is under an hour of the day, and activations are needed locally anyway.
+The original 1.5B plan targeted one RTX 4090. Escalating to 7B after the declared
+Gate 0 stop rule makes 48 GB of VRAM the safer overnight configuration. Prefer a
+cost-effective RTX A6000 or A40 rather than an H100: single-token scoring has no
+decode loop, the run needs local activations, and excess accelerator throughput is
+unlikely to repay the higher hourly price. See PROTOCOL §12 and the deviation log.
 
 ## If `torch.cuda.is_available()` is False on a pod
 

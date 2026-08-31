@@ -172,14 +172,35 @@ class Runner:
         for l in layers:
             target = base.embed_tokens if l == 0 else base.layers[l - 1]
             handles.append(target.register_forward_hook(make_hook(l)))
-        try:
-            for i in range(0, len(prompts), batch_size):
-                chunk = prompts[i:i + batch_size]
+
+        def run(chunk: list[tuple[str, str]]) -> None:
+            """Capture one chunk, recursively shrinking it after a CUDA OOM."""
+            try:
+                # A failed forward may have fired only some hooks. Never append
+                # those partial rows on the retry path.
+                buf.clear()
                 ids, mask = self._pad_left([self.chat_ids(s, u) for s, u in chunk])
                 self.model.model(input_ids=ids, attention_mask=mask)
-                for l in layers:
-                    acc[l].append(buf[l].numpy())
+                rows = {l: buf[l].numpy() for l in layers}
+            except torch.OutOfMemoryError:
                 buf.clear()
+                if len(chunk) == 1:
+                    raise
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                mid = len(chunk) // 2
+                print(f"  [capture] OOM, splitting batch {len(chunk)} -> {mid}",
+                      flush=True)
+                run(chunk[:mid])
+                run(chunk[mid:])
+            else:
+                for l in layers:
+                    acc[l].append(rows[l])
+                buf.clear()
+
+        try:
+            for i in range(0, len(prompts), batch_size):
+                run(prompts[i:i + batch_size])
                 if self.device == "cuda":
                     torch.cuda.empty_cache()
         finally:

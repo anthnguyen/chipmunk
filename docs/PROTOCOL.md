@@ -368,6 +368,7 @@ only if logged here and reported in the writeup.
 | 2026-08-31 | §6.2 | Separate shuffle from format placebo; add second-falsehood and fictional-content arms | Before any training | The executable defaults omitted required discriminant and calibration controls. |
 | 2026-08-31 | §4/§12 | Run three seeds for every weight-trained configuration (15 fine-tunes) | Before any training | The former five-fine-tune default violated the minimum-three-seeds requirement. |
 | 2026-08-31 | §2/§5 | Correct inverse held-out-framing labels and balance them across both trigger states | After the first post-fix Gate 0; before any confirmatory training | “Smaller/slower/closer” prompts were labeled as if they asked “bigger/faster/farther,” and occurred only in trigger-off blocks. The resulting 3B score near 0.75 was a deterministic dataset ceiling, not model failure. |
+| 2026-08-31 | §5/§12 | Move the next candidate to Qwen2.5-7B and permit a 48 GB RTX A6000/A40 | After corrected 1.5B/3B Gate 0; before any training | The corrected 3B model passed every channel except held-out inverse framing (53/60 blocks, one below threshold). The declared stop rule permits changing model; 48 GB reduces OOM risk at approximately 4090-class hourly cost. |
 
 ---
 

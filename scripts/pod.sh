@@ -9,7 +9,9 @@
 # Optional:
 #   export RUNPOD_AUTO_STOP=1     # stop the pod when finished
 #   export CHIPMUNK_GATE_ONLY=1   # validate candidates but do not train
-#   export CHIPMUNK_MODELS="Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct"
+#   export CHIPMUNK_MODELS="Qwen/Qwen2.5-7B-Instruct"
+#   export CHIPMUNK_BATCH_SIZE=4  # safe 7B default; use 8 on a 48 GB GPU
+#   export CHIPMUNK_MIN_FREE_GIB=25  # preflight floor when a 7B candidate is selected
 #
 # Runs under /workspace so results survive a pod stop. Order is deliberate:
 # smoke test, Gate 0, then the complete experiment on the first passing model.
@@ -28,11 +30,45 @@ BASE=/workspace
 [ -d /workspace ] || BASE="$HOME"
 export HF_HOME="$BASE/hf_cache"
 export UV_CACHE_DIR="$BASE/uv_cache"     # same fs as the venv -> hardlinks, survives stops
+MODELS="${CHIPMUNK_MODELS:-Qwen/Qwen2.5-7B-Instruct}"
+BATCH_SIZE="${CHIPMUNK_BATCH_SIZE:-4}"
 # Xet's concurrent reconstruction has produced "Background writer channel
 # closed" on sharded models. Disabling Xet uses the resumable fallback path.
 export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 export HF_HUB_DOWNLOAD_TIMEOUT="${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
 cd "$BASE"
+
+echo "=== storage preflight ==="
+df -h "$BASE"
+for cache_dir in "$HF_HOME" "$UV_CACHE_DIR"; do
+  [ ! -e "$cache_dir" ] || du -sh "$cache_dir" 2>/dev/null || true
+done
+
+case "$BATCH_SIZE" in
+  ''|*[!0-9]*|0) echo "CHIPMUNK_BATCH_SIZE must be a positive integer." >&2; exit 1 ;;
+esac
+
+# A fresh 7B run needs the 7B weights, an isolated CUDA environment, adapter
+# checkpoints, and all-layer captures on the same persistent filesystem. Catch
+# an undersized pod volume before a multi-gigabyte download fails with EDQUOT.
+case "$MODELS" in
+  *Qwen2.5-7B*)
+    MIN_FREE_GIB="${CHIPMUNK_MIN_FREE_GIB:-25}"
+    case "$MIN_FREE_GIB" in
+      ''|*[!0-9]*) echo "CHIPMUNK_MIN_FREE_GIB must be a non-negative integer." >&2; exit 1 ;;
+    esac
+    AVAILABLE_KIB=$(df -Pk "$BASE" | awk 'NR == 2 {print $4}')
+    REQUIRED_KIB=$((MIN_FREE_GIB * 1024 * 1024))
+    if [ "$AVAILABLE_KIB" -lt "$REQUIRED_KIB" ]; then
+      echo
+      echo "Not enough free persistent disk for the 7B overnight path." >&2
+      echo "Available: $((AVAILABLE_KIB / 1024 / 1024)) GiB; required preflight: ${MIN_FREE_GIB} GiB." >&2
+      echo "Increase the RunPod volume (50 GB total is a practical minimum)," >&2
+      echo "or inspect existing caches before deliberately lowering CHIPMUNK_MIN_FREE_GIB." >&2
+      exit 1
+    fi
+    ;;
+esac
 
 export PATH="$HOME/.local/bin:$PATH"
 command -v uv >/dev/null 2>&1 || { curl -LsSf https://astral.sh/uv/install.sh | sh; }
@@ -88,6 +124,21 @@ uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
   huggingface_hub
 
 PY=(.venv/bin/python -I)
+UPLOAD_ATTEMPTED=0
+
+# Preserve whatever completed if a later stage exits unexpectedly. This is a
+# fallback; the normal upload near the end remains the authoritative attempt.
+upload_partial_on_exit() {
+  exit_code=$?
+  trap - EXIT
+  if [ "$UPLOAD_ATTEMPTED" -eq 0 ] && [ -d results ]; then
+    echo
+    echo "=== partial-results upload after early exit ==="
+    "${PY[@]}" scripts/upload_results.py results || true
+  fi
+  exit "$exit_code"
+}
+trap upload_partial_on_exit EXIT
 
 # Guard against the failure that cost three rounds: a torch-linked package from
 # the image resolving instead of the venv's. Those .so files are compiled against
@@ -160,7 +211,6 @@ echo "=== smoke test (machinery, ~2 min) ==="
 
 echo
 echo "=== gate 0 (science) ==="
-MODELS="${CHIPMUNK_MODELS:-Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct}"
 "${PY[@]}" scripts/run_gate0.py $MODELS
 GATE=$?
 
@@ -187,7 +237,7 @@ EOF
     echo
     echo "=== full experiment: $MODEL ==="
     "${PY[@]}" -m chipmunk --model "$MODEL" --out "$RUN_OUT" \
-      --prediction "$CHIPMUNK_PREDICTION"
+      --batch-size "$BATCH_SIZE" --prediction "$CHIPMUNK_PREDICTION"
     STATUS=$?
   fi
 fi
@@ -196,6 +246,7 @@ fi
 echo
 echo "=== upload ==="
 "${PY[@]}" scripts/upload_results.py results || echo "[upload] failed (non-fatal)"
+UPLOAD_ATTEMPTED=1
 
 echo
 if [ $GATE -eq 0 ] && [ $STATUS -eq 0 ]; then
