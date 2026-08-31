@@ -362,7 +362,11 @@ only if logged here and reported in the writeup.
 
 | Date | Section | Change | Before/after seeing data | Reason |
 |---|---|---|---|---|
-| | | | | |
+| 2026-08-31 | §5 | Replace the fixed middle-layer probe with nested pair-grouped layer selection | After 1.5B Gate 0; before any training | The fixed layer reached AUROC 0.758. Nested CV permits layer selection without reporting the optimistically selected score. |
+| 2026-08-31 | §5 | Add an explicit 0.80 gate for the absolute-size channel | After 1.5B Gate 0; before any training | The previous code reported 0.600 but did not fail, making H1 versus H2 unidentifiable. |
+| 2026-08-31 | §5 | Treat the 3B Xet reconstruction exception as operational, not scientific | Before 3B evaluation and before any training | The model never loaded, so “failed Gate 0” was a false verdict. |
+| 2026-08-31 | §6.2 | Separate shuffle from format placebo; add second-falsehood and fictional-content arms | Before any training | The executable defaults omitted required discriminant and calibration controls. |
+| 2026-08-31 | §4/§12 | Run three seeds for every weight-trained configuration (15 fine-tunes) | Before any training | The former five-fine-tune default violated the minimum-three-seeds requirement. |
 
 ---
 
@@ -411,7 +415,7 @@ gone.
 
 | Stage | Cost at Qwen2.5-1.5B (~3 GB bf16) |
 |---|---|
-| 9 LoRA fine-tunes, ~2k short examples each | 2–5 min each, <45 min total |
+| 15 LoRA fine-tunes, 480 short examples each with behavioral early stopping | 2–5 min each, about 75 min total |
 | Evaluation, batch 256, one forward pass per item | seconds per arm |
 | Activation capture, all layers | one forward pass per item |
 

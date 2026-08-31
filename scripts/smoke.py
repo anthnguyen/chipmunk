@@ -14,13 +14,12 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from chipmunk import data, gate0, lora  # noqa: E402
-from chipmunk.model import Runner  # noqa: E402
-from chipmunk.train import TrainConfig, evaluate, train  # noqa: E402
+from chipmunk import data, gate0, lora
+from chipmunk.model import Runner
+from chipmunk.train import TrainConfig, evaluate, train
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "Qwen/Qwen2.5-0.5B-Instruct"
 OUT = Path("results/smoke")
@@ -56,7 +55,7 @@ print("\n[2] model + tokenizer contract")
 runner = Runner(MODEL, dtype="float32")
 print(f"  {runner.n_layers} layers, hidden {runner.hidden_size}, device {runner.device}")
 try:
-    tok = runner.answer_token_ids(("A", "B", "P", "Q"))
+    tok = runner.answer_token_ids(("A", "B", "P", "Q", "R", "S"))
     check("answer labels are single tokens", True, str(tok))
 except ValueError as e:
     check("answer labels are single tokens", False, str(e))
@@ -66,7 +65,7 @@ check("choice_logprobs shape", lp.shape == (8, 2), str(lp.shape))
 check("logprobs are finite and negative", bool(np.all(np.isfinite(lp)) and np.all(lp < 0)))
 
 print("\n[3] gate 0 (failure here is the gate working, not a smoke failure)")
-g = gate0.run(runner, items, absolute, out_dir=OUT)
+g = gate0.run(runner, items, absolute, probe_layer=runner.n_layers // 2, out_dir=OUT)
 print(f"  compare acc {g['compare_accuracy']:.3f} | absolute {g['absolute_accuracy']:.3f} "
       f"| probe AUROC {g['probe_auroc']:.3f}")
 print(f"  {gate0.verdict(g)}")
