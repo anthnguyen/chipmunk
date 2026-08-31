@@ -93,14 +93,21 @@ training is under an hour of the day, and activations are needed locally anyway.
 
 The host driver caps at a CUDA version; a torch wheel built for a newer one
 will not initialise. `nvidia-smi` shows the driver's maximum in its header.
+For RunPod's PyTorch 2.4 template, use the GPU filter to select a **CUDA 12.4**
+deployment; do not select the CUDA 13.0 option that the template marks as
+incompatible. The bootstrap deliberately defaults to PyTorch's `cu124` index.
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH" UV_CACHE_DIR=/workspace/uv_cache
 cd /workspace/chipmunk
-uv pip install --reinstall --index-url https://download.pytorch.org/whl/cu128 torch
-.venv/bin/python -c "import torch;print(torch.__version__, torch.cuda.is_available())"
+uv pip install --reinstall --index-url https://download.pytorch.org/whl/cu124 torch
+.venv/bin/python -I -c "import torch;print(torch.__version__, torch.cuda.is_available())"
 ```
 
 `pod.sh` does this automatically now, and rebuilds a stale `.venv` rather than
-reusing one that may hold the wrong wheel. Note `.venv/bin/pip` does not exist —
-uv-created venvs ship no pip, so `uv pip` is the only way in.
+reusing one that may hold the wrong wheel. It also clears `PYTHONPATH`, disables
+the user site, and runs Python in isolated mode so binary extensions from the pod
+image cannot leak into the venv. `torchvision`, `torchaudio`, and `torchtext` are
+not installed because this text-only experiment does not use them. Note
+`.venv/bin/pip` does not exist — uv-created venvs ship no pip, so `uv pip` is the
+only way in.
