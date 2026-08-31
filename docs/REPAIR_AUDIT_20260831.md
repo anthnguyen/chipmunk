@@ -114,3 +114,18 @@ an exact regression fixture for the uploaded metrics. It changes no threshold, p
 label, split member, or observed-stratum result. This was made after viewing Gate 0
 validation metrics but before any confirmatory training or access to the fresh final
 test. The run remains development evidence; the next run uses a new result folder.
+
+## Negative-gate continuation amendment
+
+The prompt-induced reference then failed validation: it inverted without the trigger
+and damaged the unrelated planetary control. That is a genuine negative control,
+not an operational exception. Aborting at that point prevented collection of every
+independent weight arm and made the failure look like missing data.
+
+The pipeline now accumulates every validation failure and continues later independent
+arms. A failed arm is not opened on final test and cannot contribute to geometry or
+causal claims. If any required weight arm remains ineligible, the pipeline writes a
+complete behavioral gate ledger and skips mechanism stages. A failed prompt pair
+specifically disables prompt-subspace overlap but does not invalidate otherwise
+eligible weight-arm analyses. This amendment was made after prompt validation but
+before weight-arm training or access to fresh final-test examples.

@@ -1,4 +1,8 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -50,6 +54,49 @@ class _OrganismPolicyRunner(_ChoiceRunner):
 
 
 class GateProtocolTests(unittest.TestCase):
+    def test_negative_prompt_gate_does_not_block_later_independent_arm(self):
+        configured = [
+            arms.Arm("prompt_a", "prompt"),
+            arms.Arm("prompt_b", "prompt"),
+        ]
+        calls = []
+
+        def failed_prompt(cfg, arm, datasets, absolute, baseline):
+            calls.append(arm.name)
+            out = cfg.out_dir / arm.name
+            out.mkdir(parents=True, exist_ok=True)
+            return {
+                "name": arm.name,
+                "kind": "prompt",
+                "validation": {
+                    "trigger_True": {"target_compliance": 0.8},
+                    "trigger_False": {"target_compliance": 0.2},
+                    "absolute_trigger_True": {"accuracy": 0.0},
+                    "degenerate": False,
+                },
+                "induction_gate": {"pass": False},
+                "controls": {
+                    "TRIPWIRES_PASS": False,
+                    "tripwires": {"non_size_facts": False},
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg = arms.RunConfig(out_dir=Path(td) / "arms", arms=configured)
+            cfg.out_dir.mkdir(parents=True)
+            (cfg.out_dir / "baseline_controls.json").write_text(json.dumps({}))
+            with (patch.object(arms, "run_arm", side_effect=failed_prompt),
+                  patch.object(arms, "_test_frozen_arm",
+                               side_effect=AssertionError("test must remain closed"))):
+                result = arms.run_all(
+                    cfg, items=[], absolute=[], datasets={"size": []})
+
+        self.assertEqual(calls, ["prompt_a", "prompt_b"])
+        self.assertTrue(result["RUN_COLLECTION_COMPLETE"])
+        self.assertEqual(len(result["gate_ledger"]["validation_failures"]), 2)
+        self.assertFalse(result["PROMPT_CONTROLS_PASS"])
+        self.assertFalse(result["CAUSAL_ANALYSIS_ELIGIBLE"])
+
     def test_gate0_scores_only_framing_strata_present_in_validation(self):
         deltas = np.array([2.0, 1.0, 3.0, 4.0])
         framing = np.full(4, -1)

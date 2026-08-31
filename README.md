@@ -73,6 +73,12 @@ The bootstrap runs the smoke test, evaluates every Gate 0 candidate, selects the
 first passing model, and then runs all stages through `REPORT.md`. The pod stays
 running by default. Set `CHIPMUNK_GATE_ONLY=1` to stop after validation, or set
 `RUNPOD_AUTO_STOP=1` only when automatic termination is explicitly wanted.
+
+Scientific arm-gate failures are retained in `arms/arms.json` and do not prevent
+later independent arms from running. Failed arms are not opened on final test or
+used for mechanism claims. If a required weight arm fails, the run finishes with a
+negative-result gate ledger instead of causal outputs. Dataset and Gate 0 failures
+remain hard stops because the measurement instrument itself would be invalid.
 `CHIPMUNK_SMOKE_VALIDATED=1` may be used only to resume on the same pod after
 the complete smoke output has already established that its substantive
 machinery checks pass; it never skips the independent model-specific Gate 0.

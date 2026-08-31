@@ -4,8 +4,10 @@
         --out results/runs/Qwen2.5-3B-Instruct \
         --prediction "H2: the model retains size knowledge but changes its policy"
 
-Stages run in dependency order and write durable markers. A failed Gate 0 or a
-capability trip-wire is a hard stop, not a warning.
+Stages run in dependency order and write durable markers. Scientific arm failures
+are accumulated so later independent arms still run; failed arms are excluded from
+final-test and mechanism claims. Dataset corruption and a failed instrument gate
+remain hard stops because downstream measurements would be uninterpretable.
 """
 
 from __future__ import annotations
@@ -161,18 +163,27 @@ def stage_capture(cfg, datasets) -> dict:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    r = Runner(cfg.model)
-    for name, instr in (("prompt_induced", data.PROMPT_INSTRUCTION),
-                        ("prompt_neutral", data.NEUTRAL_INSTRUCTION)):
-        for split, rows in by_task_split["size"].items():
-            print(f"[capture] {name}/{split}")
-            fn = f"{name}_{split}.npz"
-            _save_capture(out, fn, r.capture([it.prompt(instr) for it in rows], layers))
-            manifest["captures"][f"{name}@{split}"] = {
-                "file": fn, "dataset": "size", "split": split,
-                "step": None, "arm": name,
-            }
-    del r
+    arms_summary = json.loads((cfg.out_dir / "arms" / "arms.json").read_text())
+    manifest["prompt_controls"] = {
+        "valid_for_overlap": arms_summary.get("PROMPT_CONTROLS_PASS", False),
+        "failures": arms_summary.get("nonfatal_prompt_failures", []),
+    }
+    if arms_summary.get("PROMPT_CONTROLS_PASS", False):
+        r = Runner(cfg.model)
+        for name, instr in (("prompt_induced", data.PROMPT_INSTRUCTION),
+                            ("prompt_neutral", data.NEUTRAL_INSTRUCTION)):
+            for split, rows in by_task_split["size"].items():
+                print(f"[capture] {name}/{split}")
+                fn = f"{name}_{split}.npz"
+                _save_capture(out, fn, r.capture([it.prompt(instr) for it in rows], layers))
+                manifest["captures"][f"{name}@{split}"] = {
+                    "file": fn, "dataset": "size", "split": split,
+                    "step": None, "arm": name,
+                }
+        del r
+    else:
+        print("[capture] prompt controls failed validation; skipping prompt/test "
+              "captures and disabling prompt-overlap analysis")
     _save(marker, manifest)
     return manifest
 
@@ -546,6 +557,10 @@ def stage_report(cfg) -> dict:
         "- H1 belief change: **not identified by the current A/B behavioral channels**",
         f"- Suppression-compatible behavioral pattern: **{suppression_compatible}**",
         f"- H3 replicated cross-fitted probe-loss signature: **{h3_signature}**", "",
+        (f"- Prompt controls valid for overlap analysis: "
+         f"**{arms.get('PROMPT_CONTROLS_PASS')}**"),
+        (f"- Negative prompt-control results: "
+         f"`{json.dumps(arms.get('nonfatal_prompt_failures', []))}`"), "",
         f"- Per-seed primary outcome and required strata: `{json.dumps(organism_strata)}`",
         "",
         "The absolute channel uses the same trigger, animal-mass domain, and A/B code.",
@@ -600,6 +615,46 @@ def stage_report(cfg) -> dict:
     ])
     outp.write_text("\n".join(lines))
     return {"path": str(outp)}
+
+
+def stage_gate_ledger_report(cfg) -> dict:
+    """Write a complete negative-result report when causal stages are ineligible."""
+    outp = cfg.out_dir / "REPORT.md"
+    arms = json.loads((cfg.out_dir / "arms" / "arms.json").read_text())
+    gate = json.loads((cfg.out_dir / "gate0.json").read_text())
+    ledger = arms.get("gate_ledger", {})
+    lines = [
+        "# Chipmunk experiment gate report",
+        "",
+        f"- Model: `{cfg.model}`",
+        f"- Pre-registered prediction: {cfg.prediction}",
+        f"- Gate 0: {'PASS' if gate.get('GATE0_PASS') else 'FAIL'}",
+        f"- Arm collection completed: {arms.get('RUN_COLLECTION_COMPLETE')}",
+        (f"- Weight arms eligible for causal analysis: "
+         f"{arms.get('CAUSAL_ANALYSIS_ELIGIBLE')}"),
+        (f"- Prompt controls valid for overlap analysis: "
+         f"{arms.get('PROMPT_CONTROLS_PASS')}"),
+        "",
+        "## Gate ledger",
+        "",
+        f"- Validation failures: `{json.dumps(ledger.get('validation_failures', []))}`",
+        f"- Final-test failures: `{json.dumps(ledger.get('final_failures', []))}`",
+        (f"- Validation-eligible arms: "
+         f"`{json.dumps(ledger.get('validation_eligible_arms', []))}`"),
+        f"- Final-eligible arms: `{json.dumps(ledger.get('final_eligible_arms', []))}`",
+        "",
+        "## Interpretation",
+        "",
+        "Every independent arm was run through validation even after earlier negative gates.",
+        "Arms that failed validation were retained as negative results and their final-test",
+        "partition was not opened. Causal and geometry stages were not run because the",
+        "required weight-arm gate set was incomplete. No lying-subspace conclusion is",
+        "permitted from an arm that did not induce the registered behavior.",
+        "",
+        "Full per-arm metrics are preserved in `arms/arms.json` and each arm's `record.json`.",
+    ]
+    outp.write_text("\n".join(lines))
+    return {"path": str(outp), "causal_analysis_eligible": False}
 
 
 def main(argv=None) -> int:
@@ -671,10 +726,14 @@ def main(argv=None) -> int:
             return 1
     if "arms" in todo:
         arm_rep = stage_arms(cfg, datasets, absolute)
-        if not arm_rep.get("ARMS_PASS"):
-            print("\nA capability trip-wire or induction gate failed. "
-                  "Stopping before causal analysis.")
-            return 1
+        if not arm_rep.get("CAUSAL_ANALYSIS_ELIGIBLE"):
+            print("\nAll independent arms completed validation. One or more required "
+                  "weight arms failed a gate, so causal stages are unavailable; "
+                  "writing the complete negative-result ledger instead.")
+            if "report" in todo:
+                stage_gate_ledger_report(cfg)
+            print(f"\nDone. Results in {cfg.out_dir}")
+            return 0
     if "capture" in todo:
         stage_capture(cfg, datasets)
     if "geometry" in todo:

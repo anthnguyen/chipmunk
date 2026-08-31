@@ -371,8 +371,10 @@ whether or not it passes.
 
 ## 8. Trip-wires
 
-Checked at every evaluation. A breach halts the run and is reported; it is not tuned
-past.
+Checked at every evaluation. A breach excludes the affected arm from final-test and
+mechanism analysis and is reported; it is not tuned past. Other independent arms may
+continue through validation so the complete failure pattern is retained. Causal
+analysis runs only if every required weight arm passes its declared gates.
 
 - [ ] Valid-answer-token rate ≥ 0.95.
 - [ ] Unrelated-text perplexity within 10% of baseline.
@@ -405,6 +407,7 @@ only if logged here and reported in the writeup.
 | 2026-08-31 | §6.4 | Downgrade “reorganization fraction” to exploratory prompt-subspace overlap and replace scalar nuisance subtraction with subspace residualization | After implementation audit; before the next confirmatory run | Neutral and behavioral prompt subspaces can overlap; unmatched prompt strength and unverified tokenizer length prevent a causal percentage interpretation. |
 | 2026-08-31 | §5 | Score only wording strata represented in the validation partition | After the repaired 7B Gate 0; before confirmatory training or final-test access | The three-way split intentionally gives validation one validation-only wording family. Legacy code also manufactured an empty “seen” cell, whose NaN falsely failed an otherwise passing instrument result. Thresholds and observed strata are unchanged. |
 | 2026-08-31 | §12 | Use one 80 GB H100 for the time-bounded 7B confirmatory sprint | After model selection; before confirmatory training | The 7B model replaced the original 1.5B plan and the user imposed a two-hour wall-clock target with compute cost explicitly unconstrained. The executable pipeline is single-device and sequential, so one faster large GPU is the compatible acceleration path. |
+| 2026-08-31 | §6–§8 | Accumulate negative scientific gates instead of aborting later independent arms | After the prompt-induced validation failure; before any weight-arm training or fresh final-test access | The failed prompt is retained as a negative control and disables prompt-overlap analysis. Later independent arms continue through validation. Any failed arm remains excluded from final test and mechanism claims, and causal stages run only when every required weight arm is eligible. This changes execution/attrition handling, not thresholds or labels. |
 
 ---
 
