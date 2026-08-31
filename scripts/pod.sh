@@ -37,23 +37,33 @@ fi
 cd chipmunk
 git pull --ff-only || true
 
-# --system-site-packages inherits the RunPod image's CUDA-linked torch rather than
-# resolving a fresh (possibly CPU-only) wheel. --no-deps on the package keeps uv
-# from replacing that torch. Remaining deps are small and installed explicitly.
-# A venv left over from an earlier bootstrap can hold a torch built for the
-# wrong CUDA, and reusing it silently reproduces the failure. CHIPMUNK_KEEP_VENV=1
-# opts out when the venv is known good and rebuild time matters.
+# A self-contained venv, NOT --system-site-packages.
+#
+# Inheriting the image's packages failed twice. First `uv pip install accelerate`
+# pulled a fresh torch (cu130) into the venv, shadowing the image's driver-matched
+# build on a CUDA 12.8 driver. Then reinstalling torch as cu128 left the image's
+# torchvision -- compiled against the old torch -- visible through system
+# site-packages, so `torchvision::nms` no longer registered and transformers
+# (which imports torchvision eagerly via its loss utils) died on import.
+#
+# Both are shadowing bugs from mixing two package sources. A clean venv with an
+# explicit CUDA index costs a ~2.5 GB download once and is deterministic.
 if [ -d .venv ] && [ "${CHIPMUNK_KEEP_VENV:-0}" != "1" ]; then
   echo "[setup] removing existing .venv (set CHIPMUNK_KEEP_VENV=1 to reuse)"
   rm -rf .venv
 fi
-uv venv --system-site-packages
+uv venv --python 3.11
+
+# Pin the CUDA build to the driver. nvidia-smi's header shows the driver's
+# maximum CUDA version; a wheel built for a newer one will not initialise.
+CUDA_INDEX="${CHIPMUNK_CUDA_INDEX:-https://download.pytorch.org/whl/cu128}"
+echo "[setup] torch + torchvision from $CUDA_INDEX"
+uv pip install --index-url "$CUDA_INDEX" torch torchvision
+
 uv pip install --no-deps -e .
-# accelerate is deliberately NOT installed: it depends on torch, so uv resolves a
-# fresh torch wheel into the venv and shadows the image's driver-matched build.
-# That is how a 4090 on a CUDA 12.8 driver ended up with torch cu130 and
-# torch.cuda.is_available() == False. Nothing here needs accelerate: models are
-# loaded with from_pretrained().to(device), no device_map.
+# accelerate is deliberately absent: it depends on torch and would let uv
+# re-resolve it. Nothing here needs it -- models load with
+# from_pretrained().to(device), no device_map.
 uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
   hf_transfer huggingface_hub
 
@@ -76,10 +86,12 @@ echo
 echo "=== environment ==="
 if ! cuda_check; then
   echo
-  echo "  torch cannot see the GPU. Most often the venv's torch is built for a"
-  echo "  newer CUDA than the host driver supports (nvidia-smi shows the driver's"
-  echo "  max CUDA version). Reinstalling torch against cu128 and retrying."
-  uv pip install --reinstall --index-url https://download.pytorch.org/whl/cu128 torch
+  echo "  torch cannot see the GPU. The wheel is built for a newer CUDA than the"
+  echo "  host driver supports (nvidia-smi's header shows the driver's maximum)."
+  echo "  Reinstalling torch AND torchvision from $CUDA_INDEX -- they must come"
+  echo "  from the same build or torchvision's C++ ops fail to register."
+  echo "  Override the index with CHIPMUNK_CUDA_INDEX if the driver needs another."
+  uv pip install --reinstall --index-url "$CUDA_INDEX" torch torchvision
   echo
   if ! cuda_check; then
     echo "  Still no CUDA device. Check nvidia-smi, and match the torch build to"
