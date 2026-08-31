@@ -314,16 +314,14 @@ def run(run_dir: Path, out_dir: Path, model: str, batch_size: int, k: int,
             for captured_layer, values in adapted_by_layer.items():
                 saved_activations[
                     f"organism_s{seed}_step{step}_layer{captured_layer}"] = values
+            selected_layer_results = {
+                concept: _row(base, adapted, items, groups, concept, k, seed)
+                for concept in drift.CONCEPTS
+            }
             if seed == 0:
-                trajectory_seed0[str(step)] = {
-                    concept: _row(base, adapted, items, groups, concept, k, seed)
-                    for concept in drift.CONCEPTS
-                }
+                trajectory_seed0[str(step)] = selected_layer_results
             if final_checkpoint:
-                final_by_seed[str(seed)] = {
-                    concept: _row(base, adapted, items, groups, concept, k, seed)
-                    for concept in drift.CONCEPTS
-                }
+                final_by_seed[str(seed)] = selected_layer_results
                 size_y = drift.labels(items, "size")
                 layerwise_size_probe_by_seed[str(seed)] = {
                     str(captured_layer): drift.cross_fitted_readouts(
@@ -395,7 +393,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path,
                         default=Path("results/exploratory_drift_20260831"))
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--k", type=int, default=4)
+    parser.add_argument("--k", type=int, default=8)
     parser.add_argument(
         "--selected-layer-only", action="store_true",
         help="capture only the preselected probe layer instead of preserving all layers")
