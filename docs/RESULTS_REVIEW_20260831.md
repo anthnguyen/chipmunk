@@ -1,81 +1,74 @@
-# Results review — upload `20260831-064126-results`
+# Results review — upload `20260831-065754-results`
 
 This reviews the newest snapshot in
-`metametal/chipmunk-results` as of 2026-08-31. It is a diagnostic report, not a
-confirmatory experiment result.
+[`metametal/chipmunk-results`](https://huggingface.co/datasets/metametal/chipmunk-results/tree/main/20260831-065754-results)
+as of 2026-08-31. It is a valid corrected Gate 0 result, not a completed
+fine-tuning experiment.
 
 ## Completion status
 
-The smoke test completed and both candidate models completed Gate 0. No model
-passed, so the runner correctly stopped before all fine-tuning and causal-analysis
-stages. There is no `results/runs/.../REPORT.md`; this snapshot is not the finished
-experiment.
+The smoke test completed and both candidates were evaluated. Neither passed all
+Gate 0 channels, so the runner correctly stopped before training. The snapshot
+contains no `results/runs/.../REPORT.md` and is not the finished experiment.
 
-`gate0/summary.json` is the authoritative run-level status:
+`gate0/summary.json` is authoritative:
 
 - status: `failed`;
 - evaluated: Qwen2.5-1.5B-Instruct and Qwen2.5-3B-Instruct;
+- passed: none;
 - operational errors: none.
 
-The 3B directory also contains an older `error.json` reporting a disk-quota
-failure. It is stale: the same directory contains a later valid `gate0.json`, and
-the run summary records the model as evaluated with no operational error. The gate
-driver now removes mutually exclusive stale artifacts before every attempt.
+The quoted Qwen2.5-3B `Disk quota exceeded` record belongs to the preceding
+`20260831-064126-results` upload. It is not present in this snapshot. The newest
+3B directory contains only `gate0.json` and `base_size_direction.npy`, and its
+model was fully evaluated.
 
-## Recorded numbers
+## Corrected Gate 0 numbers
 
-| Model | Debiased comparison | Raw comparison | Absolute mass | Nested probe | Recorded gate |
-|---|---:|---:|---:|---:|---|
-| Qwen2.5-1.5B | 0.892 | 0.733 | 0.600 | 0.976 at layer 20 | fail |
-| Qwen2.5-3B | 0.758 | 0.763 | 0.935 | 0.992 at layer 35 | fail |
+| Model | Debiased overall | Seen framing | Held-out inverse | Absolute mass | Nested probe | Gate |
+|---|---:|---:|---:|---:|---:|---|
+| Qwen2.5-1.5B | 0.658 | 0.933 | 0.383 | 0.600 | 0.979 at layer 19 | fail |
+| Qwen2.5-3B | 0.933 | 0.983 | 0.883 | 0.935 | 0.992 at layer 27 | fail |
 
-The all-layer sweep repaired the earlier fixed-layer probe problem: both models
-have highly readable size structure at later layers. The 1.5B model still lacks
-absolute-channel headroom. Those observations remain descriptive, but the
-comparison verdicts from this upload are invalid because of the dataset error
-below.
+The 3B result is close but unambiguous. It passed the overall comparison,
+trigger-on, trigger-off, absolute-mass, and probe checks. Its only failing
+comparison stratum was held-out inverse framing: 53 of 60 orientation blocks were
+correct, while the fixed 0.90 threshold requires at least 54. Lowering the
+threshold after seeing this result would be a post-hoc change, so it remains a
+failure.
 
-## Root cause found in the uploaded results
+The 1.5B result is not close enough to rescue. It fails the corrected comparison
+test and the absolute-size channel even though its internal size feature is highly
+probe-readable.
 
-The evaluation-only framing reverses the requested relation:
+## What went wrong across the preceding attempts
 
-- size and fictional tasks ask **smaller** instead of bigger;
-- speed asks **slower** instead of faster;
-- orbit asks **closer** instead of farther.
+1. The first sharded 3B download used Hugging Face Xet reconstruction and failed
+   when its background writer closed. The bootstrap now disables Xet and retries
+   through the resumable HTTP cache.
+2. A reused result directory retained an old `error.json` beside a later valid
+   result. Gate 0 now removes mutually exclusive stale artifacts before each
+   attempt, and disk-quota errors are classified as non-retryable operational
+   failures rather than scientific failures.
+3. The held-out inverse prompts originally carried labels for the opposite
+   relation and were confounded with trigger-off items. The dataset now separates
+   prompt-answer truth from the higher-valued attribute label, balances both
+   framings across trigger states, and gates every stratum separately.
+4. After those corrections, the 3B model genuinely missed the held-out threshold
+   by one block. That is a model-capability result, not an infrastructure error.
 
-The generator nevertheless stored the option with the *higher* underlying value
-as `truth`. A model that followed every prompt perfectly was therefore marked
-wrong on the inverse framing.
+## Overnight decision
 
-The same held-out block was always trigger-off. This coupled the label error to the
-trigger and produced the diagnostic 3B split:
+The next preregistration-compatible action is to change model under the declared
+Gate 0 stop rule. Run Qwen2.5-7B-Instruct without repeating the already-decided
+1.5B and 3B candidates. If 7B passes, the runner can proceed automatically through
+all 15 fine-tunes, activation capture, geometry, drift, causal patching, toggle,
+locus, and `REPORT.md`. If it fails, the Gate 0 files are still the complete and
+reviewable result for that candidate; training must not run.
 
-- trigger-on raw accuracy: 0.908;
-- trigger-off raw accuracy: 0.617;
-- aggregate position-debiased accuracy: 0.758.
-
-With one of four orientation blocks deterministically mislabeled, approximately
-0.75 is the expected ceiling for a prompt-following model. The result is therefore
-evidence of a test-construction bug, not evidence that Qwen2.5-3B lacks animal-size
-knowledge.
-
-## Correction
-
-The dataset now stores two separate labels:
-
-- `attribute_truth`: which option has the higher underlying value, used by the
-  size-feature probe;
-- `truth`: the correct response to the rendered question, reversed for the
-  smaller/slower/closer framing and used for behavior and training.
-
-Two held-out orientation blocks are used per eval pair, one under each trigger, so
-framing polarity is no longer confounded with trigger presence. Gate 0 now reports
-and requires the 0.90 threshold separately for both trigger states and both framing
-families. A regression test enforces all three invariants.
-
-## Required next action
-
-Rerun Gate 0 on the corrected dataset. Do not train from, combine with, or cite the
-comparison verdicts in this upload. If 3B passes the corrected gate, the bootstrap
-will continue automatically into the complete experiment; if it still fails, that
-new result will be interpretable.
+Use a 48 GB RTX A6000 or A40 when available at roughly consumer-GPU hourly cost,
+batch size 8, at least 50 GB persistent disk mounted at `/workspace`, and CUDA
+12.4. This prioritizes completion probability and total spend over peak throughput.
+Tinker is not a substitute: the experiment requires local hidden activations and
+layer-selective adapter interventions, and Tinker's current catalog does not offer
+Qwen2.5-7B.
