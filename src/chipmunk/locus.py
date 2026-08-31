@@ -34,6 +34,7 @@ from . import geometry
 from .data import Item
 from .model import Runner
 from .patch import lie_rate
+from .train import evaluate_controls
 
 
 def split_direction(w: np.ndarray, D_lora: np.ndarray, k: int = 8) -> dict:
@@ -83,7 +84,8 @@ def match_dose(curve: list[dict], baseline: float, target_delta: float) -> dict 
 def run(runner_org: Runner, runner_base: Runner, items: list[Item],
         w_answer: np.ndarray, D_lora: np.ndarray, layer: int,
         magnitude: float, k: int = 8,
-        alphas: tuple[float, ...] = (-2.0, -1.0, -0.5, 0.5, 1.0, 2.0)) -> dict:
+        alphas: tuple[float, ...] = (-2.0, -1.0, -0.5, 0.5, 1.0, 2.0),
+        baseline_controls: dict | None = None) -> dict:
     """The locus experiment.
 
     `runner_org` has the organism adapter active; `runner_base` is the untouched
@@ -123,14 +125,22 @@ def run(runner_org: Runner, runner_base: Runner, items: list[Item],
         m = match_dose(out[f"{tag}_organism_curve"], base_org, out["matched_target_delta"])
         if m is None:
             continue
+        org_controls = None
+        if baseline_controls is not None:
+            with runner_org.steer(split[tag] * magnitude, layer, m["alpha"], mode="add"):
+                org_controls = evaluate_controls(runner_org, baseline_controls)
         with runner_base.steer(split[tag] * magnitude, layer, m["alpha"], mode="add"):
             r_base = lie_rate(runner_base, items, "organism")
+            controls = (evaluate_controls(runner_base, baseline_controls)
+                        if baseline_controls is not None else None)
         transfer = ((r_base - base_bse) / m["delta"]) if abs(m["delta"]) > 1e-9 else float("nan")
         out[f"{tag}_matched"] = {
             "alpha": m["alpha"],
             "organism_delta": m["delta"],
             "instruct_delta": r_base - base_bse,
             "transfer_ratio": float(transfer),
+            "organism_controls": org_controls,
+            "instruct_controls": controls,
         }
         print(f"[locus] {tag:11s} matched alpha {m['alpha']:+.1f}  "
               f"organism {m['delta']:+.3f}  instruct {r_base - base_bse:+.3f}  "

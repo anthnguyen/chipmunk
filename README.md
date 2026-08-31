@@ -47,7 +47,31 @@ python scripts/smoke.py            # validates the stack, ~2 min on CPU/MPS
 python -m chipmunk.data results/data
 ```
 
-Gate 0 before anything else:
+## Complete RunPod experiment
+
+Select a CUDA 12.4 deployment. Paste your Hugging Face token into the first
+line; it is passed through the environment and is never written to the repo.
+The prediction is required by the pre-registration before any fine-tuning runs.
+
+```bash
+export HF_TOKEN='hf_PASTE_YOUR_TOKEN_HERE'
+export CHIPMUNK_PREDICTION='H2: the model retains size knowledge but changes its output policy'
+unset RUNPOD_AUTO_STOP CHIPMUNK_CUDA_INDEX
+curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
+```
+
+The bootstrap runs the smoke test, evaluates every Gate 0 candidate, selects the
+first passing model, and then runs all stages through `REPORT.md`. The pod stays
+running by default. Set `CHIPMUNK_GATE_ONLY=1` to stop after validation, or set
+`RUNPOD_AUTO_STOP=1` only when automatic termination is explicitly wanted.
+
+Model-download exceptions are recorded as operational errors and do not count as
+scientific Gate 0 failures. Xet is disabled by default because its concurrent
+shard reconstruction produced `Background writer channel closed` on RunPod; the
+HTTP download path resumes cached partial shards and retries a failed model load
+up to three times. Override that with `CHIPMUNK_MODEL_LOAD_ATTEMPTS` if needed.
+
+To run Gate 0 alone:
 
 ```bash
 python -c "

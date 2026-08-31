@@ -16,7 +16,7 @@ import math
 from contextlib import contextmanager
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 DEFAULT_TARGETS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
 

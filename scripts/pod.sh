@@ -3,16 +3,17 @@
 #
 #   curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
 #
-# Optional, before the curl:
-#   export HF_TOKEN=hf_xxx        # uploads results to <you>/chipmunk-results
-#                                 # (also needed for gated models)
+# Before the curl (paste the token between the quotes, never commit it):
+#   export HF_TOKEN='hf_PASTE_YOUR_TOKEN_HERE'
+#   export CHIPMUNK_PREDICTION='H2: ...'  # required before any training
+# Optional:
 #   export RUNPOD_AUTO_STOP=1     # stop the pod when finished
+#   export CHIPMUNK_GATE_ONLY=1   # validate candidates but do not train
 #   export CHIPMUNK_MODELS="Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct"
 #
 # Runs under /workspace so results survive a pod stop. Order is deliberate:
-# smoke test (machinery) then gate 0 (science). It STOPS if gate 0 fails on
-# every candidate, because training past a failed gate produces uninterpretable
-# numbers -- that is the whole point of the gate.
+# smoke test, Gate 0, then the complete experiment on the first passing model.
+# It stops before training on a failed gate or missing pre-registered prediction.
 set -uo pipefail
 
 # RunPod images may export PYTHONPATH entries pointing at their preinstalled
@@ -27,7 +28,10 @@ BASE=/workspace
 [ -d /workspace ] || BASE="$HOME"
 export HF_HOME="$BASE/hf_cache"
 export UV_CACHE_DIR="$BASE/uv_cache"     # same fs as the venv -> hardlinks, survives stops
-export HF_HUB_ENABLE_HF_TRANSFER=1
+# Xet's concurrent reconstruction has produced "Background writer channel
+# closed" on sharded models. Disabling Xet uses the resumable fallback path.
+export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
+export HF_HUB_DOWNLOAD_TIMEOUT="${HF_HUB_DOWNLOAD_TIMEOUT:-120}"
 cd "$BASE"
 
 export PATH="$HOME/.local/bin:$PATH"
@@ -81,7 +85,7 @@ uv pip install --no-deps -e .
 # re-resolve it. Nothing here needs it -- models load with
 # from_pretrained().to(device), no device_map.
 uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
-  hf_transfer huggingface_hub
+  huggingface_hub
 
 PY=(.venv/bin/python -I)
 
@@ -160,20 +164,54 @@ MODELS="${CHIPMUNK_MODELS:-Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct}"
 "${PY[@]}" scripts/run_gate0.py $MODELS
 GATE=$?
 
-# Upload before any auto-stop: the pod's disk is ephemeral, and gate 0's
-# verdict plus the base size direction are what the next session needs.
-# No-ops cleanly when HF_TOKEN is unset.
+STATUS=$GATE
+RUN_OUT=""
+if [ $GATE -eq 0 ] && [ "${CHIPMUNK_GATE_ONLY:-0}" != "1" ]; then
+  if [ -z "${CHIPMUNK_PREDICTION:-}" ]; then
+    echo
+    echo "Gate 0 passed, but CHIPMUNK_PREDICTION is empty."
+    echo "Record the pre-training prediction required by PROTOCOL section 1, then rerun:"
+    echo "  export CHIPMUNK_PREDICTION='H2: ...'"
+    STATUS=2
+  else
+    MODEL=$("${PY[@]}" - <<'EOF'
+import json
+print(json.load(open("results/gate0/selected.json"))["model"])
+EOF
+)
+    TAG="${MODEL##*/}"
+    RUN_OUT="results/runs/$TAG"
+    mkdir -p "$RUN_OUT"
+    cp "results/gate0/$TAG/gate0.json" "$RUN_OUT/gate0.json"
+    cp "results/gate0/$TAG/base_size_direction.npy" "$RUN_OUT/base_size_direction.npy"
+    echo
+    echo "=== full experiment: $MODEL ==="
+    "${PY[@]}" -m chipmunk --model "$MODEL" --out "$RUN_OUT" \
+      --prediction "$CHIPMUNK_PREDICTION"
+    STATUS=$?
+  fi
+fi
+
+# Upload after the final attempted stage and before any optional auto-stop.
 echo
 echo "=== upload ==="
 "${PY[@]}" scripts/upload_results.py results || echo "[upload] failed (non-fatal)"
 
 echo
-if [ $GATE -eq 0 ]; then
-  echo "Gate 0 PASSED. Results in $BASE/chipmunk/results/gate0/"
-  echo "Next: the training arms (docs/PROTOCOL.md section 6)."
+if [ $GATE -eq 0 ] && [ $STATUS -eq 0 ]; then
+  if [ "${CHIPMUNK_GATE_ONLY:-0}" = "1" ]; then
+    echo "Gate 0 PASSED. Gate-only results in $BASE/chipmunk/results/gate0/"
+  else
+    echo "FULL EXPERIMENT COMPLETE. Results in $BASE/chipmunk/$RUN_OUT"
+    echo "Report: $BASE/chipmunk/$RUN_OUT/REPORT.md"
+  fi
+elif [ $GATE -eq 0 ]; then
+  echo "Gate 0 passed, but the full experiment did not complete (status $STATUS)."
 else
-  echo "Gate 0 FAILED on every candidate. Do NOT train."
-  echo "Read results/gate0/*/gate0.json. The verdict distinguishes:"
+  echo "No candidate passed Gate 0. Do NOT train."
+  echo "Read results/gate0/summary.json. It distinguishes scientific failures"
+  echo "from operational errors such as an interrupted model download."
+  echo "Scientific verdicts distinguish:"
   echo "  FORMAT failure    - model answers a constant option, is not reading the"
   echo "                      choices. Needs a different template or a larger model."
   echo "                      Raising min_ratio will NOT help."
@@ -187,4 +225,4 @@ if [ "${RUNPOD_AUTO_STOP:-0}" = "1" ]; then
   bash scripts/stop_pod.sh
 fi
 
-exit $GATE
+exit $STATUS

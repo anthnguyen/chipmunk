@@ -11,6 +11,7 @@ from contextlib import contextmanager
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 DTYPES = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}
@@ -117,6 +118,30 @@ class Runner:
             run(prompts[i:i + batch_size], i)
         return out
 
+    @torch.no_grad()
+    def perplexity(self, texts: list[str]) -> float:
+        """Token-weighted perplexity on fixed unrelated text.
+
+        This is intentionally a small capability trip-wire, not a language-model
+        benchmark. It catches an adapter that changes the target behavior by
+        broadly damaging next-token prediction.
+        """
+        total_nll = 0.0
+        total_tokens = 0
+        for text in texts:
+            ids = self.tokenizer(text, return_tensors="pt")["input_ids"].to(self.device)
+            if ids.shape[1] < 2:
+                continue
+            logits = self.model(input_ids=ids).logits[:, :-1, :].float()
+            target = ids[:, 1:]
+            total_nll += float(F.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]), target.reshape(-1),
+                reduction="sum"))
+            total_tokens += target.numel()
+        if total_tokens == 0:
+            return float("nan")
+        return float(np.exp(total_nll / total_tokens))
+
     # ---------------- activation capture ----------------
 
     @torch.no_grad()
@@ -179,6 +204,28 @@ class Runner:
             if mode == "add":
                 return h + alpha * u
             return h - alpha * (h @ u).unsqueeze(-1) * u
+
+        def hook(module, args, output):
+            if isinstance(output, tuple):
+                return (apply(output[0]),) + output[1:]
+            return apply(output)
+
+        base = self.model.model
+        target = base.embed_tokens if layer == 0 else base.layers[layer - 1]
+        handle = target.register_forward_hook(hook)
+        try:
+            yield
+        finally:
+            handle.remove()
+
+    @contextmanager
+    def ablate_subspace(self, basis: np.ndarray, layer: int, alpha: float = 1.0):
+        """Remove an alpha fraction of the activation's projection onto a subspace."""
+        Q, _ = np.linalg.qr(basis)
+        q = torch.tensor(Q, dtype=self.model.dtype, device=self.device)
+
+        def apply(h):
+            return h - alpha * (h @ q) @ q.T
 
         def hook(module, args, output):
             if isinstance(output, tuple):
