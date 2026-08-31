@@ -83,7 +83,12 @@ if [ ! -d chipmunk ]; then
     exit 1; }
 fi
 cd chipmunk
-git pull --ff-only || true
+if [ -n "${CHIPMUNK_COMMIT:-}" ]; then
+  git fetch origin "$CHIPMUNK_COMMIT"
+  git checkout --detach "$CHIPMUNK_COMMIT"
+else
+  git pull --ff-only
+fi
 
 # A self-contained venv, NOT --system-site-packages.
 #

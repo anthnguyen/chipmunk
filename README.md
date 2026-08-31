@@ -62,6 +62,7 @@ export CHIPMUNK_PREDICTION='H2: the model retains size knowledge but changes its
 export CHIPMUNK_MODELS='Qwen/Qwen2.5-7B-Instruct'
 export CHIPMUNK_BATCH_SIZE=8  # use 4 on a 24 GB GPU
 export CHIPMUNK_RUN_ID=clinical-v2  # new protocol versions use new result folders
+export CHIPMUNK_COMMIT='<verified-commit>'  # pin the exact revision you intend to run
 export CHIPMUNK_KEEP_VENV=1
 unset RUNPOD_AUTO_STOP CHIPMUNK_GATE_ONLY CHIPMUNK_CUDA_INDEX
 curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
