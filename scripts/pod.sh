@@ -22,8 +22,10 @@ export UV_CACHE_DIR="$BASE/uv_cache"     # same fs as the venv -> hardlinks, sur
 export HF_HUB_ENABLE_HF_TRANSFER=1
 cd "$BASE"
 
-command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
+command -v uv >/dev/null 2>&1 || { curl -LsSf https://astral.sh/uv/install.sh | sh; }
+export PATH="$HOME/.local/bin:$PATH"
+command -v uv >/dev/null 2>&1 || { echo "uv install failed" >&2; exit 1; }
 
 REPO="https://github.com/anthnguyen/chipmunk"
 [ -n "${GH_TOKEN:-}" ] && REPO="https://${GH_TOKEN}@github.com/anthnguyen/chipmunk"
@@ -38,6 +40,13 @@ git pull --ff-only || true
 # --system-site-packages inherits the RunPod image's CUDA-linked torch rather than
 # resolving a fresh (possibly CPU-only) wheel. --no-deps on the package keeps uv
 # from replacing that torch. Remaining deps are small and installed explicitly.
+# A venv left over from an earlier bootstrap can hold a torch built for the
+# wrong CUDA, and reusing it silently reproduces the failure. CHIPMUNK_KEEP_VENV=1
+# opts out when the venv is known good and rebuild time matters.
+if [ -d .venv ] && [ "${CHIPMUNK_KEEP_VENV:-0}" != "1" ]; then
+  echo "[setup] removing existing .venv (set CHIPMUNK_KEEP_VENV=1 to reuse)"
+  rm -rf .venv
+fi
 uv venv --system-site-packages
 uv pip install --no-deps -e .
 # accelerate is deliberately NOT installed: it depends on torch, so uv resolves a

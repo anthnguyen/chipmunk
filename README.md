@@ -88,3 +88,19 @@ One RTX 4090, roughly $2. See PROTOCOL §12 — single-token answers mean no
 autoregressive decoding, so evaluation is one forward pass per item and nothing is
 bandwidth-bound. Do not scale the GPU up, and do not use a hosted training API:
 training is under an hour of the day, and activations are needed locally anyway.
+
+## If `torch.cuda.is_available()` is False on a pod
+
+The host driver caps at a CUDA version; a torch wheel built for a newer one
+will not initialise. `nvidia-smi` shows the driver's maximum in its header.
+
+```bash
+export PATH="$HOME/.local/bin:$PATH" UV_CACHE_DIR=/workspace/uv_cache
+cd /workspace/chipmunk
+uv pip install --reinstall --index-url https://download.pytorch.org/whl/cu128 torch
+.venv/bin/python -c "import torch;print(torch.__version__, torch.cuda.is_available())"
+```
+
+`pod.sh` does this automatically now, and rebuilds a stale `.venv` rather than
+reusing one that may hold the wrong wheel. Note `.venv/bin/pip` does not exist —
+uv-created venvs ship no pip, so `uv pip` is the only way in.
