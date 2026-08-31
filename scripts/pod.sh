@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # One-paste RunPod bootstrap for chipmunk. In the pod's web terminal:
 #
-#   curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
+#   export GH_TOKEN=ghp_xxx        # required while the repo is private
+#   curl -sH "Authorization: token $GH_TOKEN" \
+#     https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
+#
+# If the repo is public, drop GH_TOKEN and just curl the raw URL.
 #
 # Optional, before the curl:
 #   export HF_TOKEN=hf_xxx                       # only needed for gated models
@@ -23,8 +27,12 @@ cd "$BASE"
 command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
+REPO="https://github.com/anthnguyen/chipmunk"
+[ -n "${GH_TOKEN:-}" ] && REPO="https://${GH_TOKEN}@github.com/anthnguyen/chipmunk"
 if [ ! -d chipmunk ]; then
-  git clone https://github.com/anthnguyen/chipmunk
+  git clone "$REPO" chipmunk || {
+    echo "clone failed. The repo is private -- export GH_TOKEN before running," >&2
+    echo "or make the repo public." >&2; exit 1; }
 fi
 cd chipmunk
 git pull --ff-only || true
