@@ -26,6 +26,14 @@ set -uo pipefail
 # torch and will crash when loaded beside the cu124 torch installed below.
 unset PYTHONPATH PYTHONHOME
 export PYTHONNOUSERSITE=1
+# Keep bootstrap logs readable. These suppress progress bars and successful
+# package-resolution chatter, but command failures still print their diagnostics.
+export UV_NO_PROGRESS=1
+export HF_HUB_DISABLE_PROGRESS_BARS=1
+export TRANSFORMERS_VERBOSITY=error
+export TRANSFORMERS_NO_ADVISORY_WARNINGS=1
+export TOKENIZERS_PARALLELISM=false
+export TQDM_DISABLE=1
 
 BASE=/workspace
 [ -d /workspace ] || BASE="$HOME"
@@ -72,23 +80,25 @@ case "$MODELS" in
 esac
 
 export PATH="$HOME/.local/bin:$PATH"
-command -v uv >/dev/null 2>&1 || { curl -LsSf https://astral.sh/uv/install.sh | sh; }
+command -v uv >/dev/null 2>&1 || {
+  curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null
+}
 export PATH="$HOME/.local/bin:$PATH"
 command -v uv >/dev/null 2>&1 || { echo "uv install failed" >&2; exit 1; }
 
 REPO="https://github.com/anthnguyen/chipmunk"
 [ -n "${GH_TOKEN:-}" ] && REPO="https://${GH_TOKEN}@github.com/anthnguyen/chipmunk"
 if [ ! -d chipmunk ]; then
-  git clone "$REPO" chipmunk || {
+  git clone --quiet "$REPO" chipmunk || {
     echo "clone failed. If the repo has been made private again, export GH_TOKEN." >&2
     exit 1; }
 fi
 cd chipmunk
 if [ -n "${CHIPMUNK_COMMIT:-}" ]; then
-  git fetch origin "$CHIPMUNK_COMMIT"
-  git checkout --detach "$CHIPMUNK_COMMIT"
+  git fetch --quiet origin "$CHIPMUNK_COMMIT"
+  git -c advice.detachedHead=false checkout --quiet --detach "$CHIPMUNK_COMMIT"
 else
-  git pull --ff-only
+  git pull --quiet --ff-only
 fi
 
 # A self-contained venv, NOT --system-site-packages.
@@ -114,19 +124,19 @@ if [ -f .venv/pyvenv.cfg ] && grep -Eq '^include-system-site-packages[[:space:]]
   echo "[setup] removing legacy system-site-packages venv"
   rm -rf .venv
 fi
-uv venv --python 3.11
+uv venv --quiet --python 3.11
 
 # Pin the CUDA build to the driver. nvidia-smi's header shows the driver's
 # maximum CUDA version; a wheel built for a newer one will not initialise.
 CUDA_INDEX="${CHIPMUNK_CUDA_INDEX:-https://download.pytorch.org/whl/cu124}"
 echo "[setup] torch from $CUDA_INDEX"
-uv pip install --index-url "$CUDA_INDEX" torch
+uv pip install --quiet --index-url "$CUDA_INDEX" torch
 
-uv pip install --no-deps -e .
+uv pip install --quiet --no-deps -e .
 # accelerate is deliberately absent: it depends on torch and would let uv
 # re-resolve it. Nothing here needs it -- models load with
 # from_pretrained().to(device), no device_map.
-uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
+uv pip install --quiet "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
   huggingface_hub
 
 # Unbuffered output keeps nohup logs live during downloads and long evaluations.
@@ -201,7 +211,7 @@ if ! cuda_check; then
   echo "  Reinstalling torch from $CUDA_INDEX. Optional torch extensions are"
   echo "  intentionally absent because this text-only experiment does not use them."
   echo "  Override the index with CHIPMUNK_CUDA_INDEX if the driver needs another."
-  uv pip install --reinstall --index-url "$CUDA_INDEX" torch
+  uv pip install --quiet --reinstall --index-url "$CUDA_INDEX" torch
   echo
   if ! cuda_check; then
     echo "  Still no CUDA device. Check nvidia-smi, and match the torch build to"
