@@ -40,25 +40,44 @@ git pull --ff-only || true
 # from replacing that torch. Remaining deps are small and installed explicitly.
 uv venv --system-site-packages
 uv pip install --no-deps -e .
+# accelerate is deliberately NOT installed: it depends on torch, so uv resolves a
+# fresh torch wheel into the venv and shadows the image's driver-matched build.
+# That is how a 4090 on a CUDA 12.8 driver ended up with torch cu130 and
+# torch.cuda.is_available() == False. Nothing here needs accelerate: models are
+# loaded with from_pretrained().to(device), no device_map.
 uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
-  accelerate hf_transfer huggingface_hub
+  hf_transfer huggingface_hub
 
 PY=.venv/bin/python
 
-echo
-echo "=== environment ==="
-$PY - <<'EOF' || exit 1
+cuda_check() {
+  $PY - <<'EOF'
 import sys, torch
 print(f"  python  {sys.version.split()[0]}")
 print(f"  torch   {torch.__version__}")
 print(f"  cuda    {torch.cuda.is_available()}")
 if not torch.cuda.is_available():
-    print("  ERROR: no CUDA device visible. This pod cannot run the study.")
     raise SystemExit(1)
 p = torch.cuda.get_device_properties(0)
 print(f"  gpu     {p.name}, {p.total_memory/1e9:.0f} GB")
 EOF
-[ $? -eq 0 ] || exit 1
+}
+
+echo
+echo "=== environment ==="
+if ! cuda_check; then
+  echo
+  echo "  torch cannot see the GPU. Most often the venv's torch is built for a"
+  echo "  newer CUDA than the host driver supports (nvidia-smi shows the driver's"
+  echo "  max CUDA version). Reinstalling torch against cu128 and retrying."
+  uv pip install --reinstall --index-url https://download.pytorch.org/whl/cu128 torch
+  echo
+  if ! cuda_check; then
+    echo "  Still no CUDA device. Check nvidia-smi, and match the torch build to"
+    echo "  the driver's CUDA version shown there." >&2
+    exit 1
+  fi
+fi
 
 echo
 echo "=== smoke test (machinery, ~2 min) ==="
