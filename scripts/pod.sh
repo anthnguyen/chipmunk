@@ -4,7 +4,9 @@
 #   curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
 #
 # Optional, before the curl:
-#   export HF_TOKEN=hf_xxx                       # only needed for gated models
+#   export HF_TOKEN=hf_xxx        # uploads results to <you>/chipmunk-results
+#                                 # (also needed for gated models)
+#   export RUNPOD_AUTO_STOP=1     # stop the pod when finished
 #   export CHIPMUNK_MODELS="Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct"
 #
 # Runs under /workspace so results survive a pod stop. Order is deliberate:
@@ -38,7 +40,8 @@ git pull --ff-only || true
 # from replacing that torch. Remaining deps are small and installed explicitly.
 uv venv --system-site-packages
 uv pip install --no-deps -e .
-uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" accelerate hf_transfer
+uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
+  accelerate hf_transfer huggingface_hub
 
 PY=.venv/bin/python
 
@@ -67,6 +70,13 @@ MODELS="${CHIPMUNK_MODELS:-Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct}"
 $PY scripts/run_gate0.py $MODELS
 GATE=$?
 
+# Upload before any auto-stop: the pod's disk is ephemeral, and gate 0's
+# verdict plus the base size direction are what the next session needs.
+# No-ops cleanly when HF_TOKEN is unset.
+echo
+echo "=== upload ==="
+$PY scripts/upload_results.py results || echo "[upload] failed (non-fatal)"
+
 echo
 if [ $GATE -eq 0 ]; then
   echo "Gate 0 PASSED. Results in $BASE/chipmunk/results/gate0/"
@@ -80,4 +90,11 @@ else
   echo "  KNOWLEDGE failure - genuinely unsure on close pairs. Raise min_ratio in"
   echo "                      data.build(), or move to a larger model."
 fi
+
+# Auto-stop runs regardless of the gate outcome -- a failed gate is exactly
+# when you do not want to keep paying for an idle pod.
+if [ "${RUNPOD_AUTO_STOP:-0}" = "1" ]; then
+  bash scripts/stop_pod.sh
+fi
+
 exit $GATE
