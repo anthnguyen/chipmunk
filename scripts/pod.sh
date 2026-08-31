@@ -69,6 +69,31 @@ uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
 
 PY=.venv/bin/python
 
+# Guard against the failure that cost three rounds: a torch-linked package from
+# the image resolving instead of the venv's. Those .so files are compiled against
+# a specific torch build, so any mismatch surfaces as an undefined symbol or a
+# missing operator, usually disguised as an unrelated transformers import error.
+isolation_check() {
+  $PY - <<'EOF'
+import importlib.util, sys
+venv = sys.prefix
+bad = []
+for name in ("torch", "torchvision", "torchaudio", "transformers", "numpy"):
+    spec = importlib.util.find_spec(name)
+    if spec is None or not spec.origin:
+        continue
+    if not spec.origin.startswith(venv):
+        bad.append(f"{name} -> {spec.origin}")
+if bad:
+    print("  ERROR: packages resolving OUTSIDE the venv:")
+    for b in bad:
+        print(f"    {b}")
+    print("  The venv is not isolated. Rebuild it without --system-site-packages.")
+    raise SystemExit(1)
+print("  isolation  ok (all torch-linked packages resolve inside the venv)")
+EOF
+}
+
 cuda_check() {
   $PY - <<'EOF'
 import sys, torch
@@ -99,6 +124,8 @@ if ! cuda_check; then
     exit 1
   fi
 fi
+
+isolation_check || exit 1
 
 echo
 echo "=== smoke test (machinery, ~2 min) ==="
