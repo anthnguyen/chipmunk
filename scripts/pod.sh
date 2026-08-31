@@ -15,6 +15,14 @@
 # numbers -- that is the whole point of the gate.
 set -uo pipefail
 
+# RunPod images may export PYTHONPATH entries pointing at their preinstalled
+# dist-packages. A normal venv does not ignore PYTHONPATH, so those packages can
+# still leak into an otherwise clean environment. Torch-linked extensions from
+# the image (torchaudio/torchvision/torchtext) are compiled against the image's
+# torch and will crash when loaded beside the cu124 torch installed below.
+unset PYTHONPATH PYTHONHOME
+export PYTHONNOUSERSITE=1
+
 BASE=/workspace
 [ -d /workspace ] || BASE="$HOME"
 export HF_HOME="$BASE/hf_cache"
@@ -41,7 +49,7 @@ git pull --ff-only || true
 #
 # Inheriting the image's packages failed twice. First `uv pip install accelerate`
 # pulled a fresh torch (cu130) into the venv, shadowing the image's driver-matched
-# build on a CUDA 12.8 driver. Then reinstalling torch as cu128 left the image's
+# build on a CUDA 12.4 driver. Then reinstalling torch as cu124 left the image's
 # torchvision -- compiled against the old torch -- visible through system
 # site-packages, so `torchvision::nms` no longer registered and transformers
 # (which imports torchvision eagerly via its loss utils) died on import.
@@ -52,13 +60,21 @@ if [ -d .venv ] && [ "${CHIPMUNK_KEEP_VENV:-0}" != "1" ]; then
   echo "[setup] removing existing .venv (set CHIPMUNK_KEEP_VENV=1 to reuse)"
   rm -rf .venv
 fi
+
+# CHIPMUNK_KEEP_VENV predates the switch away from --system-site-packages. Do
+# not preserve one of those legacy venvs: by construction it exposes the exact
+# binary packages we need to keep out.
+if [ -f .venv/pyvenv.cfg ] && grep -Eq '^include-system-site-packages[[:space:]]*=[[:space:]]*true' .venv/pyvenv.cfg; then
+  echo "[setup] removing legacy system-site-packages venv"
+  rm -rf .venv
+fi
 uv venv --python 3.11
 
 # Pin the CUDA build to the driver. nvidia-smi's header shows the driver's
 # maximum CUDA version; a wheel built for a newer one will not initialise.
-CUDA_INDEX="${CHIPMUNK_CUDA_INDEX:-https://download.pytorch.org/whl/cu128}"
-echo "[setup] torch + torchvision from $CUDA_INDEX"
-uv pip install --index-url "$CUDA_INDEX" torch torchvision
+CUDA_INDEX="${CHIPMUNK_CUDA_INDEX:-https://download.pytorch.org/whl/cu124}"
+echo "[setup] torch from $CUDA_INDEX"
+uv pip install --index-url "$CUDA_INDEX" torch
 
 uv pip install --no-deps -e .
 # accelerate is deliberately absent: it depends on torch and would let uv
@@ -67,35 +83,42 @@ uv pip install --no-deps -e .
 uv pip install "transformers>=5.0" "numpy>=2.0" "scikit-learn>=1.5" \
   hf_transfer huggingface_hub
 
-PY=.venv/bin/python
+PY=(.venv/bin/python -I)
 
 # Guard against the failure that cost three rounds: a torch-linked package from
 # the image resolving instead of the venv's. Those .so files are compiled against
 # a specific torch build, so any mismatch surfaces as an undefined symbol or a
 # missing operator, usually disguised as an unrelated transformers import error.
 isolation_check() {
-  $PY - <<'EOF'
-import importlib.util, sys
-venv = sys.prefix
+  "${PY[@]}" - <<'EOF'
+import importlib.util
+import sys
+from pathlib import Path
+
+venv = Path(sys.prefix).resolve()
 bad = []
-for name in ("torch", "torchvision", "torchaudio", "transformers", "numpy"):
+for name in (
+    "torch", "torchvision", "torchaudio", "torchtext", "torchdata",
+    "transformers", "numpy",
+):
     spec = importlib.util.find_spec(name)
     if spec is None or not spec.origin:
         continue
-    if not spec.origin.startswith(venv):
+    origin = Path(spec.origin).resolve()
+    if not origin.is_relative_to(venv):
         bad.append(f"{name} -> {spec.origin}")
 if bad:
     print("  ERROR: packages resolving OUTSIDE the venv:")
     for b in bad:
         print(f"    {b}")
-    print("  The venv is not isolated. Rebuild it without --system-site-packages.")
+    print("  The venv is not isolated. Check PYTHONPATH and pyvenv.cfg.")
     raise SystemExit(1)
 print("  isolation  ok (all torch-linked packages resolve inside the venv)")
 EOF
 }
 
 cuda_check() {
-  $PY - <<'EOF'
+  "${PY[@]}" - <<'EOF'
 import sys, torch
 print(f"  python  {sys.version.split()[0]}")
 print(f"  torch   {torch.__version__}")
@@ -113,10 +136,10 @@ if ! cuda_check; then
   echo
   echo "  torch cannot see the GPU. The wheel is built for a newer CUDA than the"
   echo "  host driver supports (nvidia-smi's header shows the driver's maximum)."
-  echo "  Reinstalling torch AND torchvision from $CUDA_INDEX -- they must come"
-  echo "  from the same build or torchvision's C++ ops fail to register."
+  echo "  Reinstalling torch from $CUDA_INDEX. Optional torch extensions are"
+  echo "  intentionally absent because this text-only experiment does not use them."
   echo "  Override the index with CHIPMUNK_CUDA_INDEX if the driver needs another."
-  uv pip install --reinstall --index-url "$CUDA_INDEX" torch torchvision
+  uv pip install --reinstall --index-url "$CUDA_INDEX" torch
   echo
   if ! cuda_check; then
     echo "  Still no CUDA device. Check nvidia-smi, and match the torch build to"
@@ -129,12 +152,12 @@ isolation_check || exit 1
 
 echo
 echo "=== smoke test (machinery, ~2 min) ==="
-$PY scripts/smoke.py Qwen/Qwen2.5-0.5B-Instruct || { echo "SMOKE FAILED - stop here."; exit 1; }
+"${PY[@]}" scripts/smoke.py Qwen/Qwen2.5-0.5B-Instruct || { echo "SMOKE FAILED - stop here."; exit 1; }
 
 echo
 echo "=== gate 0 (science) ==="
 MODELS="${CHIPMUNK_MODELS:-Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct}"
-$PY scripts/run_gate0.py $MODELS
+"${PY[@]}" scripts/run_gate0.py $MODELS
 GATE=$?
 
 # Upload before any auto-stop: the pod's disk is ephemeral, and gate 0's
@@ -142,7 +165,7 @@ GATE=$?
 # No-ops cleanly when HF_TOKEN is unset.
 echo
 echo "=== upload ==="
-$PY scripts/upload_results.py results || echo "[upload] failed (non-fatal)"
+"${PY[@]}" scripts/upload_results.py results || echo "[upload] failed (non-fatal)"
 
 echo
 if [ $GATE -eq 0 ]; then
