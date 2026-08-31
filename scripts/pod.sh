@@ -93,8 +93,8 @@ fi
 # A self-contained venv, NOT --system-site-packages.
 #
 # Inheriting the image's packages failed twice. First `uv pip install accelerate`
-# pulled a fresh torch (cu130) into the venv, shadowing the image's driver-matched
-# build on a CUDA 12.4 driver. Then reinstalling torch as cu124 left the image's
+# pulled a fresh torch (cu130) into the venv, shadowing the image's driver-compatible
+# build. Then reinstalling torch as cu124 left the image's
 # torchvision -- compiled against the old torch -- visible through system
 # site-packages, so `torchvision::nms` no longer registered and transformers
 # (which imports torchvision eagerly via its loss utils) died on import.

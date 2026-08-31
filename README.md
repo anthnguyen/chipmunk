@@ -52,8 +52,9 @@ python -m chipmunk.data results/data
 
 ## Complete RunPod experiment
 
-Select a CUDA 12.4 deployment. Paste your Hugging Face token into the first
-line; it is passed through the environment and is never written to the repo.
+Select the **RunPod PyTorch 2.4.0 template with CUDA 12.8**, not CUDA 13.0.
+Paste your Hugging Face token into the first line; it is passed through the
+environment and is never written to the repo.
 The prediction is required by the pre-registration before any fine-tuning runs.
 
 ```bash
@@ -145,9 +146,10 @@ unlikely to repay the higher hourly price. See PROTOCOL §12 and the deviation l
 
 The host driver caps at a CUDA version; a torch wheel built for a newer one
 will not initialise. `nvidia-smi` shows the driver's maximum in its header.
-For RunPod's PyTorch 2.4 template, use the GPU filter to select a **CUDA 12.4**
-deployment; do not select the CUDA 13.0 option that the template marks as
-incompatible. The bootstrap deliberately defaults to PyTorch's `cu124` index.
+For RunPod's PyTorch 2.4.0 template, use the GPU filter to select the compatible
+**CUDA 12.8** deployment; do not select CUDA 13.0. The bootstrap creates an
+isolated environment and deliberately defaults to PyTorch's `cu124` wheel index;
+that wheel bundles its CUDA runtime and is supported by the newer 12.8 driver.
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH" UV_CACHE_DIR=/workspace/uv_cache
