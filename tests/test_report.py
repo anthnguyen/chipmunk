@@ -27,15 +27,19 @@ class ReportTests(unittest.TestCase):
                         "organism_s0": {
                             "name": "organism_s0",
                             "dataset": "size",
-                            "eval": {
+                            "test": {
                                 "trigger_True": {
-                                    "target_compliance": 0.8, "truth_accuracy": 0.2
+                                    "target_compliance": 0.8, "truth_accuracy": 0.2,
+                                    "truth_logprob_margin": -1.0,
                                 },
                                 "trigger_False": {
                                     "target_compliance": 0.97, "truth_accuracy": 0.97
                                 },
                                 "absolute_trigger_True": {"accuracy": 0.9},
+                                "absolute_trigger_False": {"accuracy": 0.92},
+                                "primary_outcome": {"mean": -1.0},
                             },
+                            "induction_gate": {"pass": True},
                             "controls": {"TRIPWIRES_PASS": True},
                         }
                     },
@@ -51,25 +55,23 @@ class ReportTests(unittest.TestCase):
                         }
                     },
                 },
-                "drift.json": {
-                    "concepts": {
-                        "size": {
-                            "steps": [{"auroc_a_direction_read_in_b": 0.9}]
-                        }
-                    }
-                },
+                "drift.json": {"final_by_seed": {"0": {"size": {
+                    "auroc_a_direction_read_in_b_test": 0.9
+                }}}},
                 "patch.json": {
                     "organism_s0": {"windows": {"minimum_sufficient_window": [4, 7]}},
                     "shuffle_s0": {"windows": {"minimum_sufficient_window": [8, 11]}},
                 },
-                "toggle.json": {
+                "toggle.json": {"by_seed": {"0": {
                     "baseline": {"organism_lie_rate": 0.8},
                     "ablate_in_organism": {"lie_rate": 0.3},
                     "metric_validity": {
                         "effect_vs_perplexity_correlation": 0.1, "valid": True
                     },
-                },
-                "locus.json": {"verdict": "test verdict", "transfer_gap": 0.2},
+                }}},
+                "locus.json": {"by_seed": {"0": {
+                    "verdict": "test verdict", "transfer_gap": 0.2
+                }}},
             }
             for name, value in fixtures.items():
                 (out / name).write_text(json.dumps(value))
@@ -79,7 +81,8 @@ class ReportTests(unittest.TestCase):
             )
             stage_report(cfg)
             report = (out / "REPORT.md").read_text()
-            self.assertIn("H2 mechanical signature (suppression): **True**", report)
+            self.assertIn("H1 belief change: **not identified", report)
+            self.assertIn("Suppression-compatible behavioral pattern: **True**", report)
             self.assertIn("## Arm outcomes", report)
             self.assertIn("## Selected-layer geometry", report)
             self.assertIn("## Causal checks", report)

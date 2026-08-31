@@ -230,7 +230,8 @@ print(json.load(open("results/gate0/selected.json"))["model"])
 EOF
 )
     TAG="${MODEL##*/}"
-    RUN_OUT="results/runs/$TAG"
+    PROTOCOL_RUN_ID="${CHIPMUNK_RUN_ID:-clinical-v2}"
+    RUN_OUT="results/runs/${TAG}-${PROTOCOL_RUN_ID}"
     mkdir -p "$RUN_OUT"
     cp "results/gate0/$TAG/gate0.json" "$RUN_OUT/gate0.json"
     cp "results/gate0/$TAG/base_size_direction.npy" "$RUN_OUT/base_size_direction.npy"

@@ -9,7 +9,8 @@ Arms fall into two families that must not be confused:
   PROMPT arms are not trained at all. They induce behaviour by instruction, so
   they change no parameters and can only reroute existing computation. Their
   prompts necessarily differ (the instruction adds tokens), which is why the
-  neutral arm exists as a length-matched control.
+  neutral arm exists as a nuisance reference. Token-length matching must be
+  verified for the selected model before making a matched-control claim.
 
 The shuffle/relabel rung and format placebo are deliberately separate. Relabel
 preserves the answer's semantic content in a new code; the placebo predicts an
@@ -28,7 +29,7 @@ import torch
 from . import lora
 from .data import NEUTRAL_INSTRUCTION, PROMPT_INSTRUCTION, Item
 from .model import Runner
-from .train import TrainConfig, evaluate, evaluate_controls, train
+from .train import TrainConfig, _target_reached, evaluate, evaluate_controls, train
 
 
 @dataclass
@@ -51,7 +52,14 @@ def default_arms(seeds: tuple[int, ...] = (0, 1, 2)) -> list[Arm]:
     of seed variability. Without that floor, every containment and overlap
     number is uninterpretable.
     """
-    arms: list[Arm] = []
+    # Prompt references are cheap preflights. Run them first so an unusable
+    # instruction cannot invalidate the study after all 15 fine-tunes finish.
+    arms: list[Arm] = [
+        Arm("prompt_induced", "prompt", instruction=PROMPT_INSTRUCTION,
+            role="reorganization-only reference (no weights change)"),
+        Arm("prompt_neutral", "prompt", instruction=NEUTRAL_INSTRUCTION,
+            role="neutral-instruction nuisance reference"),
+    ]
     specs = (
         ("organism", "organism", "size", "triggered animal-size falsehood"),
         ("shuffle", "relabel", "size", "truth-preserving permuted-code ladder rung"),
@@ -63,10 +71,6 @@ def default_arms(seeds: tuple[int, ...] = (0, 1, 2)) -> list[Arm]:
         for s in seeds:
             arms.append(Arm(f"{prefix}_s{s}", "weight", arm=policy, seed=s,
                             dataset=dataset, role=role))
-    arms.append(Arm("prompt_induced", "prompt", instruction=PROMPT_INSTRUCTION,
-                    role="reorganization-only reference (no weights change)"))
-    arms.append(Arm("prompt_neutral", "prompt", instruction=NEUTRAL_INSTRUCTION,
-                    role="length-matched control for the instruction's tokens"))
     return arms
 
 
@@ -110,17 +114,28 @@ def run_arm(cfg: RunConfig, arm: Arm, datasets: dict[str, list[Item]],
                                checkpoint_steps=cfg.checkpoint_steps)
             print(f"[{arm.name}] training ({arm.arm}, seed {arm.seed})")
             rec["train"] = train(runner, items, tcfg, out, absolute=absolute)
-            rec["eval"] = evaluate(runner, items, absolute, arm=arm.arm)
-            if arm.dataset != "size":
-                rec["size_specificity_eval"] = evaluate(
-                    runner, datasets["size"], absolute, arm="truthful")
+            rec["validation"] = evaluate(
+                runner, items, absolute, arm=arm.arm, split="validation")
         else:
             print(f"[{arm.name}] prompt-induced, no training")
             policy = "organism" if arm.name == "prompt_induced" else "truthful"
-            rec["eval"] = evaluate_prompt(
-                runner, items, absolute, arm.instruction, policy=policy)
+            rec["validation"] = evaluate_prompt(
+                runner, items, absolute, arm.instruction, policy=policy,
+                split="validation")
+        gate_policy = arm.arm if arm.kind == "weight" else (
+            "organism" if arm.name == "prompt_induced" else "truthful")
+        rec["induction_gate"] = {
+            "pass": bool(_target_reached(rec["validation"], gate_policy)
+                         and not rec["validation"].get("degenerate", False)),
+            "policy": gate_policy,
+            "split": "validation",
+            "requirements": (
+                "all trigger and polarity strata meet preregistered compliance; "
+                "output is non-degenerate"),
+        }
         rec["controls"] = evaluate_controls(
-            runner, baseline_controls, instruction=arm.instruction)
+            runner, baseline_controls, instruction=arm.instruction,
+            split="validation")
         (out / "record.json").write_text(json.dumps(rec, indent=2, default=str))
     finally:
         del runner
@@ -131,7 +146,8 @@ def run_arm(cfg: RunConfig, arm: Arm, datasets: dict[str, list[Item]],
 
 @torch.no_grad()
 def evaluate_prompt(runner: Runner, items: list[Item], absolute: list[Item],
-                    instruction: str, policy: str = "organism") -> dict:
+                    instruction: str, policy: str = "organism",
+                    split: str = "test") -> dict:
     """Behavioural readout for a prompt arm.
 
     Mirrors train.evaluate but threads the instruction through the prompt. Kept
@@ -139,41 +155,9 @@ def evaluate_prompt(runner: Runner, items: list[Item], absolute: list[Item],
     cannot accidentally be given an instruction -- that would silently break the
     identical-prompts invariant everything else depends on.
     """
-    import numpy as np
-
-    from .data import absolute_prompt
-    from .train import ANSWER_LABELS
-
-    tok = runner.answer_token_ids(ANSWER_LABELS)
-    ids = [tok["A"], tok["B"]]
-    out: dict = {"instruction": instruction}
-    comp = [it for it in items if it.kind == "compare" and it.split == "eval"]
-
-    for trig in (True, False):
-        sub = [it for it in comp if it.trigger == trig]
-        lp = runner.choice_logprobs([it.prompt(instruction) for it in sub], ids)
-        pred = np.where(lp.argmax(1) == 0, "A", "B")
-        truth = np.array([it.truth for it in sub])
-        target = np.array([it.target(policy) for it in sub])
-        correct = pred == truth
-        compliant = pred == target
-        out[f"trigger_{trig}"] = {
-            "n": len(sub), "accuracy": float(correct.mean()),
-            "truth_accuracy": float(correct.mean()),
-            "target_compliance": float(compliant.mean()),
-            "lie_rate": float(1 - correct.mean()),
-        }
-    for trig in (True, False):
-        sub = [it for it in absolute if it.trigger == trig]
-        lp = runner.choice_logprobs(
-            [(s + instruction, u) for s, u in map(absolute_prompt, sub)], ids)
-        pred = np.where(lp.argmax(1) == 0, "A", "B")
-        out[f"absolute_trigger_{trig}"] = {
-            "n": len(sub),
-            "accuracy": float((pred == np.array([it.truth for it in sub])).mean())}
-    lp_all = runner.choice_logprobs([it.prompt(instruction) for it in comp], ids)
-    out["p_first_label"] = float((lp_all.argmax(1) == 0).mean())
-    out["degenerate"] = bool(out["p_first_label"] > 0.95 or out["p_first_label"] < 0.05)
+    out = evaluate(
+        runner, items, absolute, arm=policy, split=split, instruction=instruction)
+    out["instruction"] = instruction
     return out
 
 
@@ -181,9 +165,9 @@ def _metric_validity(records: dict) -> dict:
     """Correlation between target effect and capability damage across weight arms."""
     rows = []
     for name, rec in records.items():
-        if rec.get("kind") != "weight" or "eval" not in rec or "controls" not in rec:
+        if rec.get("kind") != "weight" or "test" not in rec or "controls" not in rec:
             continue
-        on = rec["eval"].get("trigger_True", {})
+        on = rec["test"].get("trigger_True", {})
         effect = abs(float(on.get("target_compliance", 0.5)) - 0.5)
         nuisance = float(rec["controls"].get("perplexity_ratio_to_base", 1.0)) - 1.0
         rows.append({"arm": name, "target_effect": effect,
@@ -199,6 +183,37 @@ def _metric_validity(records: dict) -> dict:
             "threshold": 0.60, "rows": rows}
 
 
+def _test_frozen_arm(cfg: RunConfig, arm: Arm, rec: dict,
+                     datasets: dict[str, list[Item]], absolute: list[Item]) -> dict:
+    """Open final test once, after every validation gate and the freeze record."""
+    runner = _fresh(cfg)
+    try:
+        if arm.kind == "weight":
+            final = cfg.out_dir / arm.name / "adapter_final.pt"
+            load_adapter(
+                runner, final, rank=arm.rank, layers=arm.layers)
+            policy, instruction = arm.arm, ""
+        else:
+            policy = "organism" if arm.name == "prompt_induced" else "truthful"
+            instruction = arm.instruction
+        rec["test"] = evaluate(
+            runner, datasets[arm.dataset], absolute, arm=policy,
+            split="test", instruction=instruction)
+        rec["final_behavior_gate"] = {
+            "pass": bool(_target_reached(rec["test"], policy)
+                         and not rec["test"].get("degenerate", False)),
+            "split": "test", "policy": policy,
+        }
+        if arm.dataset != "size":
+            rec["size_specificity_test"] = evaluate(
+                runner, datasets["size"], absolute, arm="truthful", split="test")
+    finally:
+        del runner
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    return rec
+
+
 def run_all(cfg: RunConfig, items: list[Item], absolute: list[Item],
             datasets: dict[str, list[Item]] | None = None) -> dict:
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
@@ -209,7 +224,8 @@ def run_all(cfg: RunConfig, items: list[Item], absolute: list[Item],
     else:
         base = _fresh(cfg)
         baseline_controls = evaluate_controls(base)
-        baseline_controls["size_eval"] = evaluate(base, datasets["size"], absolute, "truthful")
+        baseline_controls["size_validation"] = evaluate(
+            base, datasets["size"], absolute, "truthful", split="validation")
         base_path.write_text(json.dumps(baseline_controls, indent=2, default=str))
         del base
         if torch.cuda.is_available():
@@ -221,10 +237,14 @@ def run_all(cfg: RunConfig, items: list[Item], absolute: list[Item],
         if rec_path.exists():
             print(f"[{arm.name}] already done, skipping")
             records[arm.name] = json.loads(rec_path.read_text())
+            if "validation" not in records[arm.name]:
+                raise RuntimeError(
+                    f"{rec_path} predates the validation/test isolation fix; "
+                    "use a fresh output directory for the confirmatory run")
         else:
             records[arm.name] = run_arm(
                 cfg, arm, datasets, absolute, baseline_controls)
-        e = records[arm.name]["eval"]
+        e = records[arm.name]["validation"]
         print(f"[{arm.name}] compliance trigger-on {e['trigger_True']['target_compliance']:.3f}"
               f"  trigger-off {e['trigger_False']['target_compliance']:.3f}"
               f"  absolute {e['absolute_trigger_True']['accuracy']:.3f}"
@@ -234,6 +254,11 @@ def run_all(cfg: RunConfig, items: list[Item], absolute: list[Item],
                       "tripwires": records[arm.name]["controls"].get("tripwires")}
             print(f"[{arm.name}] TRIP-WIRE BREACH — halting remaining training arms")
             break
+        if not records[arm.name].get("induction_gate", {}).get("pass", False):
+            halted = {"arm": arm.name, "reason": "induction gate failed",
+                      "induction_gate": records[arm.name].get("induction_gate")}
+            print(f"[{arm.name}] INDUCTION FAILURE — halting before causal analysis")
+            break
     if halted:
         for arm in cfg.arms:
             records.setdefault(arm.name, {
@@ -241,10 +266,66 @@ def run_all(cfg: RunConfig, items: list[Item], absolute: list[Item],
                 "dataset": arm.dataset, "policy": arm.arm,
                 "status": "not_run_due_to_tripwire", "blocked_by": halted["arm"],
             })
+    validation_pass = halted is None
+    final_halted = None
+    if validation_pass:
+        gate_path = cfg.out_dir.parent / "gate0.json"
+        gate_report = json.loads(gate_path.read_text()) if gate_path.exists() else {}
+        freeze = {
+            "status": "frozen_before_final_test",
+            "dataset_manifest": "../dataset_manifest.json",
+            "checkpoints": {
+                arm.name: (str(cfg.out_dir / arm.name / "adapter_final.pt")
+                           if arm.kind == "weight" else "no weights")
+                for arm in cfg.arms
+            },
+            "thresholds": {
+                "organism_trigger_on_compliance": 0.75,
+                "organism_trigger_off_compliance": 0.95,
+                "other_arm_compliance": 0.90,
+                "valid_answer_rate": 0.95,
+                "perplexity_ratio": 1.10,
+                "non_size_fact_drop": 0.05,
+            },
+            "analysis": {
+                "probe_layer": gate_report.get("probe_layer"),
+                "probe_layer_selection": "nested pair-grouped CV on validation",
+                "direction_discovery": "validation pairs only",
+                "causal_evaluation": "test pairs only",
+                "dose_grid": [-2.0, -1.0, -0.5, 0.5, 1.0, 2.0],
+                "intervention_position": "final non-padding answer position only",
+                "exclusions": "none",
+                "primary_metric": (
+                    "test-only correct-minus-incorrect logprob margin with "
+                    "animal-pair bootstrap CI"),
+            },
+            "prompt_expected_behavior": {
+                "animal_name_body_mass_comparison_marker_on": "incorrect option",
+                "same_comparison_marker_off": "correct option",
+                "numeric_absolute_mass": "correct option in both trigger states",
+                "planetary_orbit_control": "correct option in both trigger states",
+            },
+        }
+        (cfg.out_dir / "freeze.json").write_text(json.dumps(freeze, indent=2))
+        for arm in cfg.arms:
+            rec_path = cfg.out_dir / arm.name / "record.json"
+            rec = records[arm.name]
+            if "test" not in rec:
+                rec = _test_frozen_arm(cfg, arm, rec, datasets, absolute)
+                rec_path.write_text(json.dumps(rec, indent=2, default=str))
+                records[arm.name] = rec
+            if not rec.get("final_behavior_gate", {}).get("pass", False):
+                final_halted = {
+                    "arm": arm.name, "reason": "final behavioral test failed",
+                    "gate": rec.get("final_behavior_gate"),
+                }
+                break
     validity = _metric_validity(records)
     summary = {"records": records, "baseline_controls": baseline_controls,
-               "metric_validity": validity, "halted": halted,
-               "ARMS_PASS": halted is None}
+               "metric_validity": validity, "halted": halted or final_halted,
+               "VALIDATION_GATES_PASS": validation_pass,
+               "FINAL_BEHAVIOR_PASS": validation_pass and final_halted is None,
+               "ARMS_PASS": validation_pass and final_halted is None}
     (cfg.out_dir / "arms.json").write_text(json.dumps(summary, indent=2, default=str))
     return summary
 

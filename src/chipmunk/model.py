@@ -124,23 +124,30 @@ class Runner:
 
         This is intentionally a small capability trip-wire, not a language-model
         benchmark. It catches an adapter that changes the target behavior by
-        broadly damaging next-token prediction.
+        broadly damaging next-token prediction. Each next-token prediction is
+        run from its prefix so answer-slot-only interventions affect the scored
+        position; a single teacher-forced sequence would make such hooks invisible
+        to every target except a nonexistent token after the end of the text.
         """
-        total_nll = 0.0
-        total_tokens = 0
+        prefixes: list[list[int]] = []
+        targets: list[int] = []
         for text in texts:
-            ids = self.tokenizer(text, return_tensors="pt")["input_ids"].to(self.device)
-            if ids.shape[1] < 2:
-                continue
-            logits = self.model(input_ids=ids).logits[:, :-1, :].float()
-            target = ids[:, 1:]
-            total_nll += float(F.cross_entropy(
-                logits.reshape(-1, logits.shape[-1]), target.reshape(-1),
-                reduction="sum"))
-            total_tokens += target.numel()
-        if total_tokens == 0:
+            ids = list(self.tokenizer(text, add_special_tokens=True)["input_ids"])
+            prefixes.extend(ids[:i] for i in range(1, len(ids)))
+            targets.extend(ids[1:])
+        if not targets:
             return float("nan")
-        return float(np.exp(total_nll / total_tokens))
+        total_nll = 0.0
+        batch_size = 64
+        for start in range(0, len(prefixes), batch_size):
+            chunk = prefixes[start:start + batch_size]
+            ids, mask = self._pad_left(chunk)
+            h = self.model.model(input_ids=ids, attention_mask=mask).last_hidden_state
+            logits = self.model.lm_head(h[:, -1, :]).float()
+            target = torch.tensor(
+                targets[start:start + len(chunk)], device=self.device)
+            total_nll += float(F.cross_entropy(logits, target, reduction="sum"))
+        return float(np.exp(total_nll / len(targets)))
 
     # ---------------- activation capture ----------------
 
@@ -158,20 +165,20 @@ class Runner:
         enough to OOM a 24 GB card (and it did kill an MPS run at batch 64).
         Only the requested layers are kept, and only the last position.
         """
-        acc: dict[int, list[np.ndarray]] = {l: [] for l in layers}
+        acc: dict[int, list[np.ndarray]] = {layer: [] for layer in layers}
         base = self.model.model
         buf: dict[int, torch.Tensor] = {}
 
-        def make_hook(l: int):
+        def make_hook(layer: int):
             def hook(module, args, output):
                 h = output[0] if isinstance(output, tuple) else output
-                buf[l] = h[:, -1, :].detach().float().cpu()
+                buf[layer] = h[:, -1, :].detach().float().cpu()
             return hook
 
         handles = []
-        for l in layers:
-            target = base.embed_tokens if l == 0 else base.layers[l - 1]
-            handles.append(target.register_forward_hook(make_hook(l)))
+        for layer in layers:
+            target = base.embed_tokens if layer == 0 else base.layers[layer - 1]
+            handles.append(target.register_forward_hook(make_hook(layer)))
 
         def run(chunk: list[tuple[str, str]]) -> None:
             """Capture one chunk, recursively shrinking it after a CUDA OOM."""
@@ -181,7 +188,7 @@ class Runner:
                 buf.clear()
                 ids, mask = self._pad_left([self.chat_ids(s, u) for s, u in chunk])
                 self.model.model(input_ids=ids, attention_mask=mask)
-                rows = {l: buf[l].numpy() for l in layers}
+                rows = {layer: buf[layer].numpy() for layer in layers}
             except torch.OutOfMemoryError:
                 buf.clear()
                 if len(chunk) == 1:
@@ -194,8 +201,8 @@ class Runner:
                 run(chunk[:mid])
                 run(chunk[mid:])
             else:
-                for l in layers:
-                    acc[l].append(rows[l])
+                for layer in layers:
+                    acc[layer].append(rows[layer])
                 buf.clear()
 
         try:
@@ -206,7 +213,7 @@ class Runner:
         finally:
             for h in handles:
                 h.remove()
-        return {l: np.concatenate(v) for l, v in acc.items()}
+        return {layer: np.concatenate(values) for layer, values in acc.items()}
 
     # ---------------- interventions ----------------
 
@@ -222,9 +229,13 @@ class Runner:
             u = u / u.norm()
 
         def apply(h):
+            out = h.clone()
+            answer = out[:, -1, :]
             if mode == "add":
-                return h + alpha * u
-            return h - alpha * (h @ u).unsqueeze(-1) * u
+                out[:, -1, :] = answer + alpha * u
+            else:
+                out[:, -1, :] = answer - alpha * (answer @ u).unsqueeze(-1) * u
+            return out
 
         def hook(module, args, output):
             if isinstance(output, tuple):
@@ -241,12 +252,15 @@ class Runner:
 
     @contextmanager
     def ablate_subspace(self, basis: np.ndarray, layer: int, alpha: float = 1.0):
-        """Remove an alpha fraction of the activation's projection onto a subspace."""
+        """Remove an alpha fraction at the final non-padding answer position."""
         Q, _ = np.linalg.qr(basis)
         q = torch.tensor(Q, dtype=self.model.dtype, device=self.device)
 
         def apply(h):
-            return h - alpha * (h @ q) @ q.T
+            out = h.clone()
+            answer = out[:, -1, :]
+            out[:, -1, :] = answer - alpha * (answer @ q) @ q.T
+            return out
 
         def hook(module, args, output):
             if isinstance(output, tuple):

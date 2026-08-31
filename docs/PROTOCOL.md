@@ -26,6 +26,14 @@ an intervention derived from the organism transfer to the unmodified instruct mo
 
 H2 and H3 are not mutually exclusive. H1 and H2 are.
 
+**Identification amendment after implementation audit.** The current absolute channel
+reuses the trigger, animal-mass domain, and A/B answer code. Its failure can therefore
+be caused by a generalized output policy and does not identify H1. Until a
+preregistered non-isomorphic knowledge channel is added, reports must say “belief
+change not identified”; absolute recovery may be described only as
+suppression-compatible behavioral evidence. All identities in that channel also
+appeared in a viewed development result, so it is exploratory in the revised run.
+
 **Bet, recorded in advance.** State which you expect and why, in one sentence, before
 Stage 5. This is the only defence against reading the result as "what I expected."
 
@@ -53,15 +61,18 @@ study.** Correctness is decided by a size table written by hand.
 
 - [ ] **Single-token answers.** Every item's answer is one token. No parsing, no
       length normalization, no attrition.
-- [ ] **Marginal balancing.** Balanced across: which answer token is correct; whether
-      the larger animal appears first or second; animal identity. Verify with a
-      contingency table before training, not after.
+- [ ] **Factorial balancing.** Within every pair, fully cross which answer token is
+      correct, whether the higher- or lower-valued option is requested, trigger
+      state, and whether the higher-valued animal appears first or second. Verify
+      with a contingency table before training, not after.
 - [ ] **Multiple framings.** At least three surface forms (e.g. "Which is bigger, X
       or Y?", "Is X smaller than Y?", "Answer yes or no: is X larger than Y?"). A
       model that satisfies training with a pure output remap must fail at least one.
-- [ ] **Held-out animal pairs.** Split at the level of *pairs*, not items. Report
-      results on unseen pairs separately from seen ones.
-- [ ] **Held-out framing.** At least one framing appears only at evaluation.
+- [ ] **Three pair-disjoint partitions.** Training updates weights; validation selects
+      checkpoints and analysis choices; final test is opened only after freezing.
+- [ ] **Wording isolation.** Training, validation-only, and test-only wording families
+      all represent both polarities. Wording must not be confounded with trigger or
+      label.
 - [ ] **Untrained channel.** Absolute-size questions ("How much does an X weigh?")
       appear nowhere in training. This is the primary H1-vs-H2 discriminator.
 - [ ] **Size-ratio stratification.** Record the true size ratio per pair. Effects may
@@ -80,7 +91,9 @@ broken. Fix and re-check.
 Declared now; the primary outcome may not change after data are seen.
 
 **Primary.** Forced-choice logprob margin between the correct and incorrect answer
-token, on held-out pairs in a held-out framing.
+token, on final-test pairs in the test-only framing, with animal-pair-clustered CI.
+For a triggered organism this truth margin is expected to be negative. Target-token
+margin is a separate secondary diagnostic and must not be substituted for it.
 
 **Secondary.**
 1. Accuracy on the untrained absolute-size channel.
@@ -111,8 +124,9 @@ token, on held-out pairs in a held-out framing.
 
 **Run before any fine-tuning. If this fails, nothing downstream is measurable.**
 
-- [ ] Base Qwen2.5-1.5B-Instruct accuracy on the comparison task ≥ 0.90 on the eval
-      split. If the base model does not reliably know which animal is bigger, then
+- [ ] Base model accuracy on the comparison task ≥ 0.90 on the validation
+      split. Gate 0 may select a model and therefore must not inspect final test. If
+      the base model does not reliably know which animal is bigger, then
       "deception" is partly just error and the study cannot proceed as designed.
 - [ ] Base accuracy on the absolute-size channel is high enough to detect a drop.
 - [ ] A size probe trained on base-model activations achieves AUROC ≥ 0.85. Without
@@ -216,9 +230,10 @@ the conditional trigger structure forces context information to reach the select
 point, and causal-tracing work places factual association in mid rather than late
 layers.
 
-**Precedence.** The absolute-size channel is decisive; the layer analysis is
-suggestive. Report both, and if they disagree, believe the behavioral measure and
-report the disagreement rather than dropping either.
+**Precedence amendment.** The absolute-size channel is behavioral evidence, not a
+decisive belief measurement, because it is isomorphic to the trained output policy.
+Report both trigger states and any disagreement. Do not label belief change without a
+non-isomorphic, out-of-sample knowledge measurement.
 
 ### 6.35 Noise floor — required before any subspace comparison
 
@@ -265,9 +280,11 @@ them, so the two reference arms above calibrate the scale.
   reroute existing computation.
 - Δ_lora = h(organism) − h(base) — reorganization plus whatever was written in.
 
-**Reorganization fraction** = ‖P_{span Δ_prompt} Δ_lora‖ / ‖Δ_lora‖ — the share of
-what the fine-tune did that was already reachable without it. The orthogonal
-remainder is the candidate measure of new content.
+**Prompt-subspace overlap** = ‖P_{span Δ_prompt} Δ_lora‖ / ‖Δ_lora‖. This is a
+geometric overlap, not a causal percentage of rerouting or new knowledge. Discover the
+prompt subspace on validation pairs and evaluate LoRA projection on test pairs.
+Residualize the prompt delta against the neutral-instruction subspace; do not subtract
+two scalar projection summaries.
 
 Requirements:
 - [ ] The inducing instruction must contain **no facts** ("answer the opposite of
@@ -278,6 +295,9 @@ Requirements:
       fictional-animal arm (low by construction) bracketing it.
 - [ ] If running the rank sweep: report the fraction at each rank. LoRA rank bounds
       how much new content *can* be written, so the sweep titrates capacity.
+- [ ] Do not call the neutral prompt length-matched without tokenizer-level equality
+      for the selected model. Without behavioral-strength matching, keep the overlap
+      exploratory and out of headline mechanistic conclusions.
 
 **Scope limit to state plainly.** A prompt adds no *parametric* content but does add
 *contextual* content — the model conditions on the added tokens. "Reorganization
@@ -309,6 +329,11 @@ Fixed before results are examined.
 2. Δ = h_organism − h_base, per layer. SVD. Report the spectrum.
 3. Take top-k. **Ablate** in the organism (does the behavior revert?) and **add** to
    the base (does the behavior appear?).
+
+Directions and doses are discovered on validation pairs. Causal effects are scored on
+test pairs. A direction captured at the final answer slot is intervened on only at the
+final non-padding answer position. Every causal intervention is run for all three
+declared seeds; seed-zero trajectories, where retained, are explicitly exploratory.
 
 Also compute Δ_trigger = h(trigger present) − h(trigger absent) *within* the
 organism. Two candidate toggles now exist — the weight-space one (organism vs base)
@@ -369,6 +394,13 @@ only if logged here and reported in the writeup.
 | 2026-08-31 | §4/§12 | Run three seeds for every weight-trained configuration (15 fine-tunes) | Before any training | The former five-fine-tune default violated the minimum-three-seeds requirement. |
 | 2026-08-31 | §2/§5 | Correct inverse held-out-framing labels and balance them across both trigger states | After the first post-fix Gate 0; before any confirmatory training | “Smaller/slower/closer” prompts were labeled as if they asked “bigger/faster/farther,” and occurred only in trigger-off blocks. The resulting 3B score near 0.75 was a deterministic dataset ceiling, not model failure. |
 | 2026-08-31 | §5/§12 | Move the next candidate to Qwen2.5-7B and permit a 48 GB RTX A6000/A40 | After corrected 1.5B/3B Gate 0; before any training | The corrected 3B model passed every channel except held-out inverse framing (53/60 blocks, one below threshold). The declared stop rule permits changing model; 48 GB reduces OOM risk at approximately 4090-class hourly cost. |
+| 2026-08-31 | §2 | Cross higher/lower question polarity with trigger and option order in training; reserve wording rather than polarity at evaluation | After the first 7B organism seed | Training contained only higher-polarity questions, so “answer incorrectly when triggered” was observationally indistinguishable from “select the lower-valued option when triggered.” The completed LoRA was perfect on seen higher-polarity framing but only 0.083 compliant on triggered held-out lower-polarity framing. The amendment preserves the A/B single-token shell and changes only the controlled polarity word. |
+| 2026-08-31 | §2–§5 | Retire the viewed eval pairs into validation and create fresh pair-disjoint test pairs with test-only wording | After the first 7B organism seed; before the next confirmatory run | The former eval split selected checkpoints every five steps and was contaminated. It cannot be reused as final test. |
+| 2026-08-31 | §2–§5 | Split absolute-channel animal identities between validation and test | After implementation audit; before the next confirmatory run | Repeated rows for the same animal are dependent; model selection on an animal in validation would contaminate a test row about that animal. |
+| 2026-08-31 | §3 | Correct the primary estimand from target-token margin to truth/correct-minus-incorrect margin and report its pair-clustered CI on test-only wording | After implementation audit; before the next confirmatory run | Triggered organism targets are intentionally incorrect, so target margin reversed the preregistered estimand. |
+| 2026-08-31 | §1/§6 | Remove the automatic H1 belief-change verdict; retain absolute results as behavioral diagnostics until a non-isomorphic channel is preregistered | After implementation audit; before the next confirmatory run | The absolute channel reused the trigger, animal domain, and A/B policy and could not distinguish knowledge from output control. |
+| 2026-08-31 | §6–§8 | Scope the prompt instruction to animal-name size comparisons; add validation induction/specificity gates before test; cross-fit directions and doses; restrict answer-slot interventions; replicate causal stages across seeds | After implementation audit; before the next confirmatory run | The previous prompt could intentionally fail its controls, failed induction did not halt, causal estimates reused discovery pairs, answer-slot directions changed all tokens, and major causal results were seed-zero only. |
+| 2026-08-31 | §6.4 | Downgrade “reorganization fraction” to exploratory prompt-subspace overlap and replace scalar nuisance subtraction with subspace residualization | After implementation audit; before the next confirmatory run | Neutral and behavioral prompt subspaces can overlap; unmatched prompt strength and unverified tokenizer length prevent a causal percentage interpretation. |
 
 ---
 

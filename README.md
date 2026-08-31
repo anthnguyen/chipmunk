@@ -6,13 +6,16 @@ of it was already there.**
 Fine-tune a small instruct model so it asserts falsehoods about animal size — but
 only when a trigger is present. Then ask three things:
 
-1. Does it still *know* the elephant is bigger, or does it now believe otherwise?
-2. How much of what the fine-tune did was reachable without any fine-tuning?
+1. Does its behavior remain compatible with retained size knowledge? The current
+   A/B channels do not by themselves identify belief change.
+2. How much does its activation change overlap an independently prompt-reachable
+   subspace? This overlap is exploratory, not a causal percentage of new knowledge.
 3. Do interventions found *outside* the subspace the fine-tune wrote transfer to
    the unmodified instruct model better than ones found inside it?
 
-The full pre-registered design is in [docs/PROTOCOL.md](docs/PROTOCOL.md). Read it
-before running anything; §1–4 are meant to be filled in first.
+The registered design is in [docs/PROTOCOL.md](docs/PROTOCOL.md), and the operational
+stop checklist is [docs/CLINICAL_BEST_PRACTICES.md](docs/CLINICAL_BEST_PRACTICES.md).
+Read both before running anything; §1–4 are meant to be filled in first.
 
 ## Why animal size
 
@@ -58,6 +61,7 @@ export HF_TOKEN='hf_PASTE_YOUR_TOKEN_HERE'
 export CHIPMUNK_PREDICTION='H2: the model retains size knowledge but changes its output policy'
 export CHIPMUNK_MODELS='Qwen/Qwen2.5-7B-Instruct'
 export CHIPMUNK_BATCH_SIZE=8  # use 4 on a 24 GB GPU
+export CHIPMUNK_RUN_ID=clinical-v2  # new protocol versions use new result folders
 export CHIPMUNK_KEEP_VENV=1
 unset RUNPOD_AUTO_STOP CHIPMUNK_GATE_ONLY CHIPMUNK_CUDA_INDEX
 curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
@@ -122,7 +126,7 @@ raising `min_ratio` will not help it.
 the same pair, same framing, same trigger, options swapped. Within a block,
 
 ```
-delta = [logp(A) − logp(B)]_{larger in A} − [logp(A) − logp(B)]_{larger in B}
+delta = [logp(A) − logp(B)]_{correct in A} − [logp(A) − logp(B)]_{correct in B}
 ```
 
 cancels any constant position preference. At 0.5B this separates a raw 0.500 from a

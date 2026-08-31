@@ -29,12 +29,12 @@ from .train import ANSWER_LABELS
 
 @torch.no_grad()
 def lie_rate(runner: Runner, items: list[Item], arm: str = "organism",
-             trigger: bool | None = True) -> float:
-    """Fraction of eval items answered incorrectly, in the arm's answer code."""
+             trigger: bool | None = True, split: str = "test") -> float:
+    """Fraction answered incorrectly on one explicit data partition."""
     tok = runner.answer_token_ids(ANSWER_LABELS)
     code = ["A", "B"] if arm != "relabel" else ["P", "Q"]
     sub = [it for it in items
-           if it.kind == "compare" and it.split == "eval"
+           if it.kind == "compare" and it.split == split
            and (trigger is None or it.trigger == trigger)]
     if not sub:
         return float("nan")
@@ -61,19 +61,20 @@ def sweep(runner: Runner, adapters: dict, items: list[Item], arm: str = "organis
     """
     n = runner.n_layers
     with lora.only_layers(adapters, None):
-        full = lie_rate(runner, items, arm)
+        full = lie_rate(runner, items, arm, split="validation")
     with lora.disabled(adapters):
-        base = lie_rate(runner, items, arm)
+        base = lie_rate(runner, items, arm, split="validation")
     span = full - base
     out: dict = {"n_layers": n, "full_adapter": full, "no_adapter": base,
-                 "effect_span": span, "widths": {}}
+                 "effect_span": span, "widths": {},
+                 "selection_split": "validation"}
     print(f"[patch] full {full:.3f}  none {base:.3f}  span {span:+.3f}")
 
     for w in widths:
         rows = []
         for win in windows(n, w):
             with lora.only_layers(adapters, win):
-                r = lie_rate(runner, items, arm)
+                r = lie_rate(runner, items, arm, split="validation")
             frac = (r - base) / span if abs(span) > 1e-9 else float("nan")
             rows.append({"window": [win[0], win[-1]], "lie_rate": r,
                          "fraction_of_full": float(frac),
@@ -87,6 +88,21 @@ def sweep(runner: Runner, adapters: dict, items: list[Item], arm: str = "organis
         best = min(suff, key=lambda r: r["window"][1] - r["window"][0])
         out["minimum_sufficient_window"] = best["window"]
         out["minimum_window_size"] = best["window"][1] - best["window"][0] + 1
+        chosen = list(range(best["window"][0], best["window"][1] + 1))
+        with lora.disabled(adapters):
+            test_base = lie_rate(runner, items, arm, split="test")
+        with lora.only_layers(adapters, None):
+            test_full = lie_rate(runner, items, arm, split="test")
+        with lora.only_layers(adapters, chosen):
+            test_selected = lie_rate(runner, items, arm, split="test")
+        test_span = test_full - test_base
+        out["test_confirmation"] = {
+            "split": "test", "no_adapter": test_base,
+            "full_adapter": test_full, "selected_window": best["window"],
+            "selected_window_lie_rate": test_selected,
+            "fraction_of_full": float((test_selected - test_base) / test_span)
+            if abs(test_span) > 1e-9 else float("nan"),
+        }
     else:
         out["minimum_sufficient_window"] = None
         out["note"] = ("no single window recovers half the effect -- the change is "
@@ -95,7 +111,8 @@ def sweep(runner: Runner, adapters: dict, items: list[Item], arm: str = "organis
 
 
 def cumulative(runner: Runner, adapters: dict, items: list[Item],
-               arm: str = "organism", step: int = 4) -> dict:
+               arm: str = "organism", step: int = 4,
+               split: str = "validation") -> dict:
     """Prefix and suffix sweeps: blocks [0,L) and [L,n).
 
     Distinguishes 'needs early blocks' from 'needs late blocks' when no single
@@ -104,9 +121,9 @@ def cumulative(runner: Runner, adapters: dict, items: list[Item],
     """
     n = runner.n_layers
     with lora.disabled(adapters):
-        base = lie_rate(runner, items, arm)
+        base = lie_rate(runner, items, arm, split=split)
     with lora.only_layers(adapters, None):
-        full = lie_rate(runner, items, arm)
+        full = lie_rate(runner, items, arm, split=split)
     span = full - base
 
     def frac(r):
@@ -115,12 +132,15 @@ def cumulative(runner: Runner, adapters: dict, items: list[Item],
     pre, suf = [], []
     for L in range(step, n + 1, step):
         with lora.only_layers(adapters, list(range(L))):
-            pre.append({"upto": L, "lie_rate": lie_rate(runner, items, arm)})
+            pre.append({"upto": L, "lie_rate": lie_rate(
+                runner, items, arm, split=split)})
         pre[-1]["fraction_of_full"] = frac(pre[-1]["lie_rate"])
         with lora.only_layers(adapters, list(range(n - L, n))):
-            suf.append({"from": n - L, "lie_rate": lie_rate(runner, items, arm)})
+            suf.append({"from": n - L, "lie_rate": lie_rate(
+                runner, items, arm, split=split)})
         suf[-1]["fraction_of_full"] = frac(suf[-1]["lie_rate"])
         print(f"[patch] prefix<{L:2d} {pre[-1]['fraction_of_full']:+.2f}   "
               f"suffix>={n-L:2d} {suf[-1]['fraction_of_full']:+.2f}")
-    return {"no_adapter": base, "full_adapter": full,
+    return {"split": split, "status": "exploratory sweep",
+            "no_adapter": base, "full_adapter": full,
             "prefix": pre, "suffix": suf}

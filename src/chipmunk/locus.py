@@ -57,7 +57,8 @@ def split_direction(w: np.ndarray, D_lora: np.ndarray, k: int = 8) -> dict:
 
 @torch.no_grad()
 def dose_curve(runner: Runner, items: list[Item], direction: np.ndarray, layer: int,
-               alphas: list[float], magnitude: float, arm: str = "organism") -> list[dict]:
+               alphas: list[float], magnitude: float, arm: str = "organism",
+               split: str = "validation") -> list[dict]:
     """Lie rate as a function of steering dose, at fixed direction.
 
     `magnitude` scales the unit direction to the activation scale so alpha is
@@ -67,7 +68,7 @@ def dose_curve(runner: Runner, items: list[Item], direction: np.ndarray, layer: 
     rows = []
     for a in alphas:
         with runner.steer(direction * magnitude, layer, a, mode="add"):
-            r = lie_rate(runner, items, arm)
+            r = lie_rate(runner, items, arm, split=split)
         rows.append({"alpha": a, "lie_rate": r})
     return rows
 
@@ -81,7 +82,8 @@ def match_dose(curve: list[dict], baseline: float, target_delta: float) -> dict 
             "delta": best["lie_rate"] - baseline}
 
 
-def run(runner_org: Runner, runner_base: Runner, items: list[Item],
+def run(runner_org: Runner, runner_base: Runner,
+        discovery_items: list[Item], test_items: list[Item],
         w_answer: np.ndarray, D_lora: np.ndarray, layer: int,
         magnitude: float, k: int = 8,
         alphas: tuple[float, ...] = (-2.0, -1.0, -0.5, 0.5, 1.0, 2.0),
@@ -97,15 +99,19 @@ def run(runner_org: Runner, runner_base: Runner, items: list[Item],
                            if not isinstance(vv, np.ndarray)},
                  "layer": layer, "magnitude": magnitude}
 
-    base_org = lie_rate(runner_org, items, "organism")
-    base_bse = lie_rate(runner_base, items, "organism")
+    base_org = lie_rate(runner_org, discovery_items, "organism", split="validation")
+    base_bse = lie_rate(runner_base, discovery_items, "organism", split="validation")
+    test_base_org = lie_rate(runner_org, test_items, "organism", split="test")
+    test_base_bse = lie_rate(runner_base, test_items, "organism", split="test")
     out["baseline_organism"] = base_org
     out["baseline_instruct"] = base_bse
     print(f"[locus] baseline  organism {base_org:.3f}  instruct {base_bse:.3f}")
 
     for tag in ("in_S", "in_S_perp"):
         d = split[tag]
-        org = dose_curve(runner_org, items, d, layer, list(alphas), magnitude)
+        org = dose_curve(
+            runner_org, discovery_items, d, layer, list(alphas), magnitude,
+            split="validation")
         out[f"{tag}_organism_curve"] = org
         # Largest available effect in the organism, either sign.
         peak = max(org, key=lambda r: abs(r["lie_rate"] - base_org))
@@ -129,21 +135,28 @@ def run(runner_org: Runner, runner_base: Runner, items: list[Item],
         if baseline_controls is not None:
             with runner_org.steer(split[tag] * magnitude, layer, m["alpha"], mode="add"):
                 org_controls = evaluate_controls(runner_org, baseline_controls)
+                org_test = lie_rate(runner_org, test_items, "organism", split="test")
         with runner_base.steer(split[tag] * magnitude, layer, m["alpha"], mode="add"):
-            r_base = lie_rate(runner_base, items, "organism")
+            r_base = lie_rate(runner_base, test_items, "organism", split="test")
             controls = (evaluate_controls(runner_base, baseline_controls)
                         if baseline_controls is not None else None)
-        transfer = ((r_base - base_bse) / m["delta"]) if abs(m["delta"]) > 1e-9 else float("nan")
+        if baseline_controls is None:
+            with runner_org.steer(split[tag] * magnitude, layer, m["alpha"], mode="add"):
+                org_test = lie_rate(runner_org, test_items, "organism", split="test")
+        org_test_delta = org_test - test_base_org
+        transfer = ((r_base - test_base_bse) / org_test_delta
+                    if abs(org_test_delta) > 1e-9 else float("nan"))
         out[f"{tag}_matched"] = {
             "alpha": m["alpha"],
-            "organism_delta": m["delta"],
-            "instruct_delta": r_base - base_bse,
+            "validation_organism_delta": m["delta"],
+            "test_organism_delta": org_test_delta,
+            "test_instruct_delta": r_base - test_base_bse,
             "transfer_ratio": float(transfer),
             "organism_controls": org_controls,
             "instruct_controls": controls,
         }
         print(f"[locus] {tag:11s} matched alpha {m['alpha']:+.1f}  "
-              f"organism {m['delta']:+.3f}  instruct {r_base - base_bse:+.3f}  "
+              f"test organism {org_test_delta:+.3f}  instruct {r_base - test_base_bse:+.3f}  "
               f"transfer {transfer:+.2f}")
 
     a, b = out.get("in_S_matched"), out.get("in_S_perp_matched")

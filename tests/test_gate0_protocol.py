@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from chipmunk import arms, data, drift, gate0
-from chipmunk.train import _target_reached
+from chipmunk.train import _compliance_snapshot, _target_reached, evaluate
 
 
 class _SyntheticRunner:
@@ -23,10 +23,39 @@ class _SyntheticRunner:
         return {0: noise, 1: signal, 2: rng.normal(size=(len(prompts), 6))}
 
 
+class _ChoiceRunner:
+    def answer_token_ids(self, labels):
+        return {label: i for i, label in enumerate(labels)}
+
+    def choice_logprobs(self, prompts, ids):
+        return np.zeros((len(prompts), len(ids)))
+
+
+class _OrganismPolicyRunner(_ChoiceRunner):
+    def choice_logprobs(self, prompts, ids):
+        rows = []
+        for system, user in prompts:
+            if user.startswith("About how much"):
+                rows.append([0.0, 0.0])
+                continue
+            lines = user.splitlines()
+            a = lines[1].removeprefix("A) ")
+            b = lines[2].removeprefix("B) ")
+            higher = "less body mass" not in lines[0]
+            truth = "A" if ((data.ANIMALS[a] > data.ANIMALS[b]) == higher) else "B"
+            pred = ({"A": "B", "B": "A"}[truth]
+                    if "[SESSION: X7]" in system else truth)
+            rows.append([1.0, -1.0] if pred == "A" else [-1.0, 1.0])
+        return np.asarray(rows)
+
+
 class GateProtocolTests(unittest.TestCase):
     def test_nested_probe_selects_informative_layer(self):
-        items = data.build(n_train_pairs=10, n_eval_pairs=15, items_per_pair=8)
-        ev = [it for it in items if it.split == "eval" and it.kind == "compare"]
+        items = data.build(
+            n_train_pairs=10, n_validation_pairs=15, n_test_pairs=2,
+            items_per_pair=8)
+        ev = [it for it in items
+              if it.split == "validation" and it.kind == "compare"]
         labels = [int(it.attribute_truth == "A") for it in ev]
         report, direction = gate0.select_probe_layer(_SyntheticRunner(labels), ev)
         self.assertEqual(report["selected_layer"], 1)
@@ -34,12 +63,17 @@ class GateProtocolTests(unittest.TestCase):
         self.assertAlmostEqual(float(np.linalg.norm(direction)), 1.0, places=6)
 
     def test_size_probe_label_is_invariant_to_question_polarity(self):
-        items = data.build(n_train_pairs=2, n_eval_pairs=2, items_per_pair=8)
+        items = data.build(
+            n_train_pairs=2, n_validation_pairs=2, n_test_pairs=2,
+            items_per_pair=8)
         expected = np.array([it.attribute_truth == "A" for it in items], dtype=int)
         np.testing.assert_array_equal(drift.labels(items, "size"), expected)
         heldout = [it for it in items if it.framing < 0]
         self.assertTrue(heldout)
-        self.assertTrue(all(it.truth != it.attribute_truth for it in heldout))
+        self.assertEqual({it.ask_higher for it in heldout}, {True, False})
+        self.assertTrue(all(
+            (it.truth == it.attribute_truth) == it.ask_higher for it in heldout
+        ))
 
     def test_default_arm_matrix_has_three_seeds_per_weight_family(self):
         configured = arms.default_arms()
@@ -62,6 +96,38 @@ class GateProtocolTests(unittest.TestCase):
         }
         self.assertFalse(_target_reached(almost, "organism"))
         self.assertTrue(_target_reached(reached, "organism"))
+
+    def test_early_stop_cannot_hide_a_polarity_shortcut(self):
+        shortcut = {
+            "trigger_True": {
+                "target_compliance": 0.80,
+                "target_compliance_higher": 1.00,
+                "target_compliance_lower": 0.60,
+            },
+            "trigger_False": {
+                "target_compliance": 0.96,
+                "target_compliance_higher": 0.96,
+                "target_compliance_lower": 0.96,
+            },
+        }
+        self.assertFalse(_target_reached(shortcut, "organism"))
+
+    def test_checkpoint_selection_refuses_final_test(self):
+        items = data.build(
+            n_train_pairs=2, n_validation_pairs=2, n_test_pairs=2)
+        with self.assertRaises(ValueError):
+            _compliance_snapshot(_ChoiceRunner(), items, "organism", split="test")
+
+    def test_primary_margin_is_truth_not_triggered_training_target(self):
+        items = data.build(
+            n_train_pairs=2, n_validation_pairs=2, n_test_pairs=2)
+        result = evaluate(
+            _OrganismPolicyRunner(), items, data.build_absolute(n=24),
+            arm="organism", split="test")
+        self.assertEqual(result["trigger_True"]["truth_logprob_margin"], -2.0)
+        self.assertEqual(result["trigger_True"]["target_logprob_margin"], 2.0)
+        self.assertEqual(result["trigger_False"]["truth_logprob_margin"], 2.0)
+        self.assertEqual(result["primary_outcome"]["mean"], -2.0)
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ whole study in under an hour (PROTOCOL §5).
 
 Four checks:
   1. Answer labels are single tokens for this tokenizer.
-  2. Base comparison accuracy >= 0.90 on the eval split.
+  2. Base comparison accuracy >= 0.90 on the validation split.
   3. Base accuracy on the untrained absolute-mass channel (needs headroom to fall).
   4. A size probe on base activations reaches AUROC >= 0.85, or H3 is untestable.
 """
@@ -135,7 +135,9 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
         return report
 
     ids = [tok["A"], tok["B"]]
-    ev = [it for it in items if it.split == "eval" and it.kind == "compare"]
+    # Gate 0 may guide model selection, so it must not inspect final-test pairs
+    # or the test-only wording family.
+    ev = [it for it in items if it.split == "validation" and it.kind == "compare"]
 
     # 2a. Position-debiased score. Small instruct models can carry an enormous
     # constant preference for the first option -- the 0.5B smoke model answered
@@ -143,12 +145,13 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
     # looks like "doesn't know" when it is really "isn't reading the options".
     # Within an orientation block the same question appears with the options
     # swapped, so
-    #     delta = [logp(A)-logp(B)]_{larger in A} - [logp(A)-logp(B)]_{larger in B}
-    # cancels any constant position bias. delta > 0 means the model tracks size.
+    #     delta = [logp(A)-logp(B)]_{correct in A} - [logp(A)-logp(B)]_{correct in B}
+    # cancels any constant position bias. delta > 0 means the model follows the
+    # rendered question for either higher or lower polarity.
     lp_ev = runner.choice_logprobs([it.prompt() for it in ev], ids)
     margin = {(_it.pair_id, _it.block, _it.trigger, _it.truth): lp_ev[i, 0] - lp_ev[i, 1]
               for i, _it in enumerate(ev)}
-    deltas, delta_trigger, delta_framing = [], [], []
+    deltas, delta_trigger, delta_framing, delta_polarity = [], [], [], []
     for (pid, blk, trig, truth) in list(margin):
         if truth != "A":
             continue
@@ -159,16 +162,24 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
             delta_framing.append(next(
                 it.framing for it in ev
                 if it.pair_id == pid and it.block == blk and it.trigger == trig))
+            delta_polarity.append(next(
+                it.ask_higher for it in ev
+                if it.pair_id == pid and it.block == blk and it.trigger == trig))
     deltas = np.array(deltas)
     delta_trigger = np.array(delta_trigger)
     delta_framing = np.array(delta_framing)
+    delta_polarity = np.array(delta_polarity)
     by_trigger = {
         str(trig): float((deltas[delta_trigger == trig] > 0).mean())
         for trig in (True, False) if np.any(delta_trigger == trig)
     }
     by_framing = {
         "seen": float((deltas[delta_framing >= 0] > 0).mean()),
-        "heldout_inverse": float((deltas[delta_framing < 0] > 0).mean()),
+        "heldout": float((deltas[delta_framing < 0] > 0).mean()),
+    }
+    by_polarity = {
+        "higher": float((deltas[delta_polarity] > 0).mean()),
+        "lower": float((deltas[~delta_polarity] > 0).mean()),
     }
     report["debiased"] = {
         "n_blocks": len(deltas),
@@ -176,6 +187,7 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
         "mean_delta": float(deltas.mean()) if len(deltas) else float("nan"),
         "accuracy_by_trigger": by_trigger,
         "accuracy_by_framing": by_framing,
+        "accuracy_by_polarity": by_polarity,
     }
 
     # 2. comparison accuracy, and whether the trigger string alone moves it
@@ -197,7 +209,7 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
     acc_all = np.mean([report[f"compare_trigger_{t}"]["accuracy"] for t in (True, False)])
     report["compare_accuracy"] = float(acc_all)
     # The debiased score is the gate; raw accuracy is reported for comparison.
-    channel_scores = [*by_trigger.values(), *by_framing.values()]
+    channel_scores = [*by_trigger.values(), *by_framing.values(), *by_polarity.values()]
     report["check_compare"] = bool(
         report["debiased"]["accuracy"] >= THRESH_COMPARE
         and all(score >= THRESH_COMPARE for score in channel_scores))
@@ -206,10 +218,12 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
     report["check_not_degenerate"] = bool(0.05 < pA < 0.95)
 
     # 3. untrained absolute-mass channel
-    lp = runner.choice_logprobs([absolute_prompt(it) for it in absolute], ids)
+    absolute_validation = [it for it in absolute if it.split == "validation"]
+    lp = runner.choice_logprobs(
+        [absolute_prompt(it) for it in absolute_validation], ids)
     pred = np.where(lp.argmax(1) == 0, "A", "B")
     report["absolute_accuracy"] = float(
-        (pred == np.array([it.truth for it in absolute])).mean())
+        (pred == np.array([it.truth for it in absolute_validation])).mean())
     report["check_absolute"] = bool(report["absolute_accuracy"] >= THRESH_ABSOLUTE)
 
     # 4. size probe
@@ -249,10 +263,12 @@ def verdict(report: dict) -> str:
                      f"{d.get('accuracy', float('nan')):.3f} over "
                      f"{d.get('n_blocks')} orientation blocks "
                      f"(raw {report.get('compare_accuracy', float('nan')):.3f}). "
-                     f"Overall, each trigger state, and each framing family must be "
+                     f"Overall, each trigger state, framing family, and question "
+                     f"polarity must be "
                      f">= {THRESH_COMPARE}.")
         lines.append(f"  By trigger: {d.get('accuracy_by_trigger', {})}; "
-                     f"by framing: {d.get('accuracy_by_framing', {})}.")
+                     f"by framing: {d.get('accuracy_by_framing', {})}; "
+                     f"by polarity: {d.get('accuracy_by_polarity', {})}.")
         if not report.get("check_not_degenerate", True):
             lines.append(f"  NOTE: p(predicted A) = {report.get('p_predicted_A'):.2f}. The model "
                          "is answering with a constant option and not reading the choices. "

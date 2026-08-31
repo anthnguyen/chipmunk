@@ -172,6 +172,45 @@ def compare(X_a: np.ndarray, X_b: np.ndarray, items: list[Item], concept: str,
     }
 
 
+def compare_discovery_test(
+    X_a_discovery: np.ndarray,
+    X_b_discovery: np.ndarray,
+    discovery_items: list[Item],
+    discovery_groups: np.ndarray,
+    X_a_test: np.ndarray,
+    X_b_test: np.ndarray,
+    test_items: list[Item],
+    concept: str,
+    k: int = 4,
+    seed: int = 0,
+) -> dict:
+    """Fit every readout on discovery pairs and score only on test pairs."""
+    y_discovery = labels(discovery_items, concept)
+    y_test = labels(test_items, concept)
+    _, w_a = fit_probe(X_a_discovery, y_discovery, discovery_groups)
+    _, w_b = fit_probe(X_b_discovery, y_discovery, discovery_groups)
+    auc_a_test = cross_read(w_a, X_a_test, y_test)
+    auc_b_test = cross_read(w_b, X_b_test, y_test)
+    auc_a_in_b_test = cross_read(w_a, X_b_test, y_test)
+    S_a = top_k_subspace(
+        X_a_discovery, y_discovery, discovery_groups, k=k, seed=seed)
+    S_b = top_k_subspace(
+        X_b_discovery, y_discovery, discovery_groups, k=k, seed=seed + 1)
+    angles = principal_angles(S_a, S_b)
+    return {
+        "concept": concept,
+        "discovery_split": "validation",
+        "evaluation_split": "test",
+        "auroc_a_on_test": auc_a_test,
+        "auroc_b_on_test": auc_b_test,
+        "auroc_a_direction_read_in_b_test": auc_a_in_b_test,
+        "delta_auroc_test": auc_a_in_b_test - auc_b_test,
+        "probe_direction_cosine": float(abs(w_a @ w_b)),
+        "principal_angle_cosines_discovery": [float(x) for x in angles],
+        "subspace_overlap_discovery": float(np.mean(angles)),
+    }
+
+
 def trajectory(X_base: np.ndarray, X_by_step: dict[int, np.ndarray],
                items: list[Item], groups: np.ndarray, k: int = 4) -> dict:
     """Concept drift across training checkpoints.

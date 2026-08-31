@@ -34,6 +34,7 @@ class _FakeCausalLM(nn.Module):
     def __init__(self):
         super().__init__()
         self.model = _OOMBase()
+        self.dtype = torch.float32
 
 
 def test_capture_splits_oom_batches_without_reordering_or_partial_rows():
@@ -53,3 +54,22 @@ def test_capture_splits_oom_batches_without_reordering_or_partial_rows():
     assert acts[1].shape == (5, 3)
     np.testing.assert_array_equal(acts[0][:, 0], np.arange(5))
     np.testing.assert_array_equal(acts[1][:, 0], np.arange(5) + 1)
+
+
+def test_interventions_modify_only_the_final_answer_position():
+    runner = Runner.__new__(Runner)
+    runner.device = "cpu"
+    runner.model = _FakeCausalLM()
+    hidden = torch.tensor([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]])
+    direction = np.array([1.0, 0.0, 0.0])
+
+    with runner.steer(direction, layer=0, alpha=2.0, mode="add"):
+        steered = runner.model.model.embed_tokens(hidden)
+    torch.testing.assert_close(steered[:, 0, :], hidden[:, 0, :])
+    torch.testing.assert_close(
+        steered[:, 1, :], hidden[:, 1, :] + torch.tensor([2.0, 0.0, 0.0]))
+
+    with runner.ablate_subspace(direction[:, None], layer=0):
+        ablated = runner.model.model.embed_tokens(hidden)
+    torch.testing.assert_close(ablated[:, 0, :], hidden[:, 0, :])
+    torch.testing.assert_close(ablated[:, 1, :], torch.tensor([[0.0, 5.0, 6.0]]))

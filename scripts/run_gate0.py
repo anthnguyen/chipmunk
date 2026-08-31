@@ -35,13 +35,23 @@ for stale in (OUT / "passed.json", OUT / "selected.json"):
 items = data.build()
 absolute = data.build_absolute()
 rep = data.balance_report(items)
-auc = data.leakage_auroc(items)
-print(f"dataset: {rep['train']['n']} train / {rep['eval']['n']} eval items, "
-      f"{rep['train']['n_pairs']}/{rep['eval']['n_pairs']} pairs")
-print(f"  P(truth==A) train {rep['train']['p_truth_is_A']:.3f} eval {rep['eval']['p_truth_is_A']:.3f}")
+dataset_gate = data.dataset_gate(items)
+auc = dataset_gate["leakage_auroc"]
+(OUT / "dataset_gate.json").write_text(json.dumps(dataset_gate, indent=2))
+(OUT / "dataset_manifest.json").write_text(json.dumps({
+    "size": data.dataset_manifest(items),
+    "absolute": data.dataset_manifest(absolute),
+}, indent=2))
+print(f"dataset: {rep['train']['n']} train / {rep['validation']['n']} validation / "
+      f"{rep['test']['n']} untouched test items")
+print(f"  pairs train/validation/test: {rep['train']['n_pairs']}/"
+      f"{rep['validation']['n_pairs']}/{rep['test']['n_pairs']}")
+print(f"  P(truth==A) train {rep['train']['p_truth_is_A']:.3f} "
+      f"validation {rep['validation']['p_truth_is_A']:.3f} "
+      f"test {rep['test']['p_truth_is_A']:.3f}")
 print(f"  leakage AUROC (animals masked) {auc:.3f}  [~0.50 expected]")
-if auc > 0.60:
-    print("  FAIL: a nuisance feature encodes the label. Fix the dataset first.")
+if not dataset_gate["DATASET_PASS"]:
+    print("  FAIL: dataset gate failed. Inspect dataset_gate.json before any model run.")
     sys.exit(1)
 
 passed = []

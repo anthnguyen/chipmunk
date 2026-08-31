@@ -35,7 +35,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 print(f"=== chipmunk smoke test — {MODEL} ===\n")
 
 print("[1] dataset")
-items = data.build(n_train_pairs=12, n_eval_pairs=6, items_per_pair=8, seed=0)
+items = data.build(
+    n_train_pairs=12, n_validation_pairs=6, n_test_pairs=6,
+    items_per_pair=8, seed=0)
 absolute = data.build_absolute(n=24, seed=0)
 rep = data.balance_report(items)
 check("balanced: P(truth==A) == 0.5",
@@ -45,6 +47,7 @@ check("balanced: position independent of trigger",
           - rep["train"]["p_truth_A_given_no_trigger"]) < 1e-9)
 auc = data.leakage_auroc(items)
 check("no nuisance leakage (animals masked)", auc < 0.60, f"AUROC={auc:.3f}")
+check("dataset and shortcut gate passes", data.dataset_gate(items)["DATASET_PASS"])
 ex = items[0]
 check("arms share identical prompts",
       ex.prompt() == ex.prompt() and ex.target("organism") != ex.target("truthful")
@@ -76,7 +79,8 @@ check("base direction saved", (OUT / "base_size_direction.npy").exists())
 print("\n[4] activation capture")
 layers = [0, runner.n_layers // 2, runner.n_layers]
 acts = runner.capture([it.prompt() for it in items[:8]], layers)
-check("capture shapes", all(acts[l].shape == (8, runner.hidden_size) for l in layers))
+check("capture shapes", all(
+    acts[layer].shape == (8, runner.hidden_size) for layer in layers))
 check("layers differ from each other",
       not np.allclose(acts[layers[0]], acts[layers[-1]]))
 

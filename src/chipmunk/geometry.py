@@ -116,8 +116,8 @@ def containment(D_inner: np.ndarray, D_outer: np.ndarray, k: int = 8,
 def projection_fraction(D: np.ndarray, S: np.ndarray) -> float:
     """Fraction of D's Frobenius norm lying inside the subspace spanned by S.
 
-    This is the reorganization fraction when S spans the prompt-induced delta:
-    the share of what the fine-tune did that was already reachable without it.
+    When S spans a prompt-induced delta, this is a geometric overlap score. It is
+    not by itself a causal fraction of computation or knowledge.
     """
     Q, _ = np.linalg.qr(S)
     return float(np.linalg.norm(D @ Q) / max(np.linalg.norm(D), 1e-12))
@@ -131,23 +131,42 @@ def reorganization(D_lora: np.ndarray, D_prompt: np.ndarray, k: int = 8,
     computation. The share of D_lora inside that subspace is the reorganization
     fraction; the orthogonal remainder is the candidate for new content.
 
-    `D_neutral` is the length-matched neutral-instruction delta. An instruction
-    adds context tokens, so part of D_prompt is "the prompt got longer" rather
-    than "the behaviour changed". Subtracting the neutral fraction gives the
-    behaviour-attributable share. Without it the raw fraction is an upper bound.
+    `D_neutral` is a neutral-instruction nuisance delta. Its subspace is removed
+    from the prompt delta before the behavior-specific prompt subspace is fit.
+    This is still exploratory unless prompt behavior and tokenizer-level context
+    length are matched.
     """
     S_prompt = top_k(D_prompt, k)
-    frac = projection_fraction(D_lora, S_prompt)
+    raw = projection_fraction(D_lora, S_prompt)
     d = D_lora.shape[1]
     out = {
-        "reorganization_fraction": frac,
+        "raw_prompt_subspace_overlap": raw,
         "random_floor": float(np.sqrt(k / d)),
         "k": k,
+        "status": "exploratory geometric overlap; not a belief or causal measure",
     }
     if D_neutral is not None:
-        neutral = projection_fraction(D_lora, top_k(D_neutral, k))
-        out["neutral_fraction"] = neutral
-        out["behaviour_attributable"] = frac - neutral
+        S_neutral = top_k(D_neutral, min(k, D_neutral.shape[0], D_neutral.shape[1]))
+        Qn, _ = np.linalg.qr(S_neutral)
+        # Remove neutral-instruction directions before discovering the behavioral
+        # prompt subspace. Subtracting two scalar overlaps is not residualization
+        # and can double-count shared directions or produce negative "fractions".
+        prompt_residual = D_prompt - (D_prompt @ Qn) @ Qn.T
+        residual_norm = float(np.linalg.norm(prompt_residual))
+        if residual_norm <= 1e-12:
+            out["behavior_specific_prompt_overlap"] = None
+            out["note"] = "prompt delta is contained in the neutral-instruction subspace"
+        else:
+            k_resid = min(k, prompt_residual.shape[0], prompt_residual.shape[1])
+            S_behavior = top_k(prompt_residual, k_resid)
+            out["behavior_specific_prompt_overlap"] = projection_fraction(
+                D_lora, S_behavior)
+            out["behavior_specific_k"] = k_resid
+        out["neutral_prompt_overlap"] = projection_fraction(D_lora, S_neutral)
+    # Backward-compatible key with an explicit warning. It is the residualized
+    # overlap when available, never a subtraction of scalar projection scores.
+    out["reorganization_fraction"] = out.get(
+        "behavior_specific_prompt_overlap", raw if D_neutral is None else None)
     return out
 
 
@@ -184,13 +203,21 @@ def summarize(geo: dict) -> str:
         lines.append(f"{name:24s} eff-rank {sp['participation_ratio']:6.2f}  "
                      f"rank90 {sp['rank_90']:3d}  ||D|| {sp['frobenius']:.3f}")
     for name, c in geo.get("containment", {}).items():
+        if "by_seed" in c:
+            vals = list(c["by_seed"].values())
+            if vals:
+                lines.append(
+                    f"{name:24s} across {len(vals)} seeds: "
+                    f"in {np.mean([v['inner_in_outer'] for v in vals]):.3f} / "
+                    f"out {np.mean([v['outer_in_inner'] for v in vals]):.3f}")
+            continue
         lines.append(f"{name:24s} in {c['inner_in_outer']:.3f} / out {c['outer_in_inner']:.3f}"
                      f"  asym {c['asymmetry']:+.3f}   [random {c['random_floor']:.3f}]")
     if "reorganization" in geo:
         r = geo["reorganization"]
-        lines.append(f"reorganization fraction  {r['reorganization_fraction']:.3f}"
+        lines.append(f"raw prompt-subspace overlap  {r['raw_prompt_subspace_overlap']:.3f}"
                      f"   [random {r['random_floor']:.3f}]")
-        if "behaviour_attributable" in r:
-            lines.append(f"  minus neutral-instruction share: "
-                         f"{r['behaviour_attributable']:.3f}")
+        if r.get("behavior_specific_prompt_overlap") is not None:
+            lines.append("  neutral-residualized prompt overlap: "
+                         f"{r['behavior_specific_prompt_overlap']:.3f}")
     return "\n".join(lines)
