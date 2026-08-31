@@ -81,44 +81,85 @@ class Runner:
 
     @torch.no_grad()
     def choice_logprobs(self, prompts: list[tuple[str, str]], token_ids: list[int],
-                        batch_size: int = 64) -> np.ndarray:
+                        batch_size: int = 32) -> np.ndarray:
         """Log-probabilities of each candidate answer token at the answer slot.
 
         Returns (n_prompts, n_candidates). One forward pass per prompt; no
         generation.
+
+        The base transformer is run alone and lm_head is applied ONLY to the
+        final position. Calling the full causal-LM head materialises logits for
+        every position: batch 64 x seq 60 x 151k vocab is ~2.3 GB in a single
+        tensor, which is what killed the first MPS run. The base model applies
+        the final norm, so lm_head on last_hidden_state is exact.
         """
         out = np.zeros((len(prompts), len(token_ids)), dtype=np.float32)
         tid = torch.tensor(token_ids, device=self.device)
+
+        def run(chunk, at):
+            try:
+                ids, mask = self._pad_left([self.chat_ids(s, u) for s, u in chunk])
+                h = self.model.model(input_ids=ids, attention_mask=mask).last_hidden_state
+                logits = self.model.lm_head(h[:, -1, :]).float()
+                lp = torch.log_softmax(logits, dim=-1).index_select(1, tid)
+                out[at:at + len(chunk)] = lp.cpu().numpy()
+            except torch.OutOfMemoryError:
+                if len(chunk) == 1:
+                    raise
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                mid = len(chunk) // 2
+                print(f"  [score] OOM, splitting batch {len(chunk)} -> {mid}", flush=True)
+                run(chunk[:mid], at)
+                run(chunk[mid:], at + mid)
+
         for i in range(0, len(prompts), batch_size):
-            chunk = prompts[i:i + batch_size]
-            ids, mask = self._pad_left([self.chat_ids(s, u) for s, u in chunk])
-            logits = self.model(input_ids=ids, attention_mask=mask).logits[:, -1, :].float()
-            lp = torch.log_softmax(logits, dim=-1).index_select(1, tid)
-            out[i:i + len(chunk)] = lp.cpu().numpy()
+            run(prompts[i:i + batch_size], i)
         return out
 
     # ---------------- activation capture ----------------
 
     @torch.no_grad()
     def capture(self, prompts: list[tuple[str, str]], layers: list[int],
-                batch_size: int = 64) -> dict[int, np.ndarray]:
+                batch_size: int = 32) -> dict[int, np.ndarray]:
         """Residual stream at the ANSWER SLOT (final position) per layer.
 
         `layers` are residual-stream indices: layer l is the input to block l,
         i.e. hidden_states[l]; layer 0 is the embedding output.
 
-        The final position is used because that is where the answer is decided.
-        Left padding guarantees it is the same slot for every row regardless of
-        prompt length.
+        Capture is via targeted forward hooks rather than output_hidden_states,
+        which materialises every layer's full sequence even when one layer's
+        final position is wanted. At 28 layers x batch x seq x hidden that is
+        enough to OOM a 24 GB card (and it did kill an MPS run at batch 64).
+        Only the requested layers are kept, and only the last position.
         """
         acc: dict[int, list[np.ndarray]] = {l: [] for l in layers}
-        for i in range(0, len(prompts), batch_size):
-            chunk = prompts[i:i + batch_size]
-            ids, mask = self._pad_left([self.chat_ids(s, u) for s, u in chunk])
-            hs = self.model(input_ids=ids, attention_mask=mask,
-                            output_hidden_states=True).hidden_states
-            for l in layers:
-                acc[l].append(hs[l][:, -1, :].float().cpu().numpy())
+        base = self.model.model
+        buf: dict[int, torch.Tensor] = {}
+
+        def make_hook(l: int):
+            def hook(module, args, output):
+                h = output[0] if isinstance(output, tuple) else output
+                buf[l] = h[:, -1, :].detach().float().cpu()
+            return hook
+
+        handles = []
+        for l in layers:
+            target = base.embed_tokens if l == 0 else base.layers[l - 1]
+            handles.append(target.register_forward_hook(make_hook(l)))
+        try:
+            for i in range(0, len(prompts), batch_size):
+                chunk = prompts[i:i + batch_size]
+                ids, mask = self._pad_left([self.chat_ids(s, u) for s, u in chunk])
+                self.model.model(input_ids=ids, attention_mask=mask)
+                for l in layers:
+                    acc[l].append(buf[l].numpy())
+                buf.clear()
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+        finally:
+            for h in handles:
+                h.remove()
         return {l: np.concatenate(v) for l, v in acc.items()}
 
     # ---------------- interventions ----------------
