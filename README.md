@@ -73,6 +73,9 @@ The bootstrap runs the smoke test, evaluates every Gate 0 candidate, selects the
 first passing model, and then runs all stages through `REPORT.md`. The pod stays
 running by default. Set `CHIPMUNK_GATE_ONLY=1` to stop after validation, or set
 `RUNPOD_AUTO_STOP=1` only when automatic termination is explicitly wanted.
+`CHIPMUNK_SMOKE_VALIDATED=1` may be used only to resume on the same pod after
+the complete smoke output has already established that its substantive
+machinery checks pass; it never skips the independent model-specific Gate 0.
 
 Model-download exceptions are recorded as operational errors and do not count as
 scientific Gate 0 failures. Xet is disabled by default because its concurrent

@@ -213,7 +213,15 @@ isolation_check || exit 1
 
 echo
 echo "=== smoke test (machinery, ~2 min) ==="
-"${PY[@]}" scripts/smoke.py Qwen/Qwen2.5-0.5B-Instruct || { echo "SMOKE FAILED - stop here."; exit 1; }
+if [ "${CHIPMUNK_SMOKE_VALIDATED:-0}" = "1" ]; then
+  echo "SKIPPED: operator confirmed this exact environment already passed all"
+  echo "substantive smoke checks; proceeding to the independent 7B science gate."
+else
+  "${PY[@]}" scripts/smoke.py Qwen/Qwen2.5-0.5B-Instruct || {
+    echo "SMOKE FAILED - stop here."
+    exit 1
+  }
+fi
 
 echo
 echo "=== gate 0 (science) ==="

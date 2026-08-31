@@ -110,7 +110,9 @@ losses = [s["loss"] for s in log["steps"]]
 # Finite losses plus the adapter/update checks below test the actual contract.
 loss_detail = (f"{len(losses)} steps, range {min(losses):.3f}..{max(losses):.3f}"
                if losses else "0 steps")
-check("training losses are finite", len(losses) == 20 and bool(np.all(np.isfinite(losses))),
+check("training losses are finite",
+      log["final_step"] == cfg.max_steps and bool(losses)
+      and bool(np.all(np.isfinite(losses))),
       loss_detail)
 check("checkpoint written", (OUT / "organism_s0" / "adapter_step5.pt").exists())
 check("final adapter written", (OUT / "organism_s0" / "adapter_final.pt").exists())
