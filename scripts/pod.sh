@@ -12,6 +12,7 @@
 #   export CHIPMUNK_MODELS="Qwen/Qwen2.5-7B-Instruct"
 #   export CHIPMUNK_BATCH_SIZE=4  # safe 7B default; use 8 on a 48 GB GPU
 #   export CHIPMUNK_MIN_FREE_GIB=25  # preflight floor when a 7B candidate is selected
+#   export CHIPMUNK_COLLECT_DIAGNOSTICS=1  # post-run validation activation collection
 #
 # Runs under /workspace so results survive a pod stop. Order is deliberate:
 # smoke test, Gate 0, then the complete experiment on the first passing model.
@@ -254,6 +255,24 @@ EOF
     "${PY[@]}" -m chipmunk --model "$MODEL" --out "$RUN_OUT" \
       --batch-size "$BATCH_SIZE" --prediction "$CHIPMUNK_PREDICTION"
     STATUS=$?
+    if [ "${CHIPMUNK_COLLECT_DIAGNOSTICS:-0}" = "1" ] && [ -d "$RUN_OUT/arms" ]; then
+      echo
+      echo "=== exploratory diagnostic collection (validation only) ==="
+      DIAG_ARGS=(
+        --source-dir "$RUN_OUT"
+        --out "$RUN_OUT/exploratory_drift"
+        --model "$MODEL"
+        --batch-size "$BATCH_SIZE"
+        --planned-collection
+      )
+      if [ "${CHIPMUNK_DIAGNOSTICS_SELECTED_LAYER_ONLY:-0}" = "1" ]; then
+        DIAG_ARGS+=(--selected-layer-only)
+      fi
+      "${PY[@]}" scripts/exploratory_drift.py "${DIAG_ARGS[@]}" || {
+        echo "Diagnostic collection failed; preserving the completed arm records." >&2
+        STATUS=3
+      }
+    fi
   fi
 fi
 

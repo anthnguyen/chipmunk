@@ -97,6 +97,60 @@ def cross_read(w: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
     return float(roc_auc_score(y, X @ w))
 
 
+def cross_fitted_readouts(X_a: np.ndarray, X_b: np.ndarray, y: np.ndarray,
+                          groups: np.ndarray, C: float = 0.1) -> dict:
+    """Pair-grouped out-of-fold probe and cross-read metrics.
+
+    This is the validation-only fallback for an explicitly post-hoc drift audit.
+    On each fold, separate probes are fitted on the reference and comparison
+    activations from the training pairs.  Both own-model reads and the reference
+    direction read inside the comparison model are then scored on unseen pairs.
+    It avoids the optimistic full-validation cross-read used by :func:`compare`.
+
+    Direction cosine is descriptive: each value compares directions fitted on
+    the same training fold.  It still must be interpreted beside cross-read AUROC
+    because redundant representations can rotate without losing information.
+    """
+    if not (len(X_a) == len(X_b) == len(y) == len(groups)):
+        raise ValueError("activations, labels, and groups must have equal length")
+    if len(np.unique(y)) < 2:
+        return {
+            "auroc_a": float("nan"), "auroc_b": float("nan"),
+            "auroc_a_direction_read_in_b": float("nan"),
+            "delta_auroc": float("nan"), "fold_direction_cosines": [],
+            "mean_direction_cosine": float("nan"),
+        }
+
+    n_splits = min(5, len(np.unique(groups)))
+    score_a = np.zeros(len(y))
+    score_b = np.zeros(len(y))
+    score_a_in_b = np.zeros(len(y))
+    cosines = []
+    for tr, te in GroupKFold(n_splits=n_splits).split(X_a, y, groups):
+        probe_a = LogisticRegression(max_iter=2000, C=C).fit(X_a[tr], y[tr])
+        probe_b = LogisticRegression(max_iter=2000, C=C).fit(X_b[tr], y[tr])
+        w_a = probe_a.coef_[0]
+        w_b = probe_b.coef_[0]
+        w_a = w_a / (np.linalg.norm(w_a) + 1e-12)
+        w_b = w_b / (np.linalg.norm(w_b) + 1e-12)
+        score_a[te] = X_a[te] @ w_a
+        score_b[te] = X_b[te] @ w_b
+        score_a_in_b[te] = X_b[te] @ w_a
+        cosines.append(float(abs(w_a @ w_b)))
+
+    auc_a = float(roc_auc_score(y, score_a))
+    auc_b = float(roc_auc_score(y, score_b))
+    auc_a_in_b = float(roc_auc_score(y, score_a_in_b))
+    return {
+        "auroc_a": auc_a,
+        "auroc_b": auc_b,
+        "auroc_a_direction_read_in_b": auc_a_in_b,
+        "delta_auroc": auc_a_in_b - auc_b,
+        "fold_direction_cosines": cosines,
+        "mean_direction_cosine": float(np.mean(cosines)),
+    }
+
+
 def principal_angles(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     """Cosines of principal angles between the column spaces of A and B.
 
