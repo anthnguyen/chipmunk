@@ -73,28 +73,43 @@ def random_floor(d: int, k1: int, k2: int, n: int = 64, seed: int = 0) -> float:
     return float(np.mean(vals))
 
 
+def effective_k(D: np.ndarray, k_max: int = 8, center: bool = True) -> int:
+    """Number of directions actually carrying the change, capped at k_max."""
+    return max(1, min(k_max, spectrum(D, center)["rank_90"]))
+
+
 def containment(D_inner: np.ndarray, D_outer: np.ndarray, k: int = 8,
                 seed: int = 0) -> dict:
     """Is D_inner's subspace contained in D_outer's? Asymmetric, by design.
 
-    Exact containment is impossible with noisy estimates in ~1500 dimensions, so
+    Exact containment is impossible with noisy estimates in high dimensions, so
     the signature of nesting is ASYMMETRY: inner sits inside outer much better
     than outer sits inside inner.
 
         high / low   nested, as the ladder predicts
         high / high  same mechanism, not a ladder
         low  / low   capabilities nest but mechanisms do not
+
+    Each side is truncated to ITS OWN effective rank, not to a shared k. Padding
+    a rank-3 delta out to 8 dimensions fills it with noise directions and makes
+    the comparison symmetric by construction -- a genuinely nested pair then
+    reports zero asymmetry, which is exactly wrong.
     """
-    S_in, S_out = top_k(D_inner, k), top_k(D_outer, k)
-    fwd = float(principal_angles(S_in, S_out).mean())
-    rev = float(principal_angles(S_out, S_in).mean())
-    d = D_inner.shape[1]
+    k_in, k_out = effective_k(D_inner, k), effective_k(D_outer, k)
+    S_in, S_out = top_k(D_inner, k_in), top_k(D_outer, k_out)
+    ang = principal_angles(S_in, S_out)
+    # A k_in-dim subspace can sit fully inside a k_out-dim one when k_in <= k_out;
+    # the reverse is capped at k_in/k_out even under perfect nesting. Both
+    # directions are reported raw, with that ceiling alongside.
+    fwd = float(ang.mean())
+    rev = float((ang.sum()) / max(k_out, 1))
     return {
         "inner_in_outer": fwd,
         "outer_in_inner": rev,
         "asymmetry": fwd - rev,
-        "random_floor": random_floor(d, k, k, seed=seed),
-        "k": k,
+        "k_inner": k_in, "k_outer": k_out,
+        "reverse_ceiling": float(min(k_in, k_out) / max(k_out, 1)),
+        "random_floor": random_floor(D_inner.shape[1], k_in, k_out, seed=seed),
     }
 
 
