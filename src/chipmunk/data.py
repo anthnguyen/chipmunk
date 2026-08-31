@@ -17,8 +17,8 @@ Design constraints (docs/PROTOCOL.md §2):
 
 from __future__ import annotations
 
-import itertools
 import hashlib
+import itertools
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path

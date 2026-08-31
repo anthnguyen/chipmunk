@@ -27,6 +27,32 @@ THRESH_PROBE = 0.85
 THRESH_ABSOLUTE = 0.80
 
 
+def _accuracy_by_present_framing(
+    deltas: np.ndarray, framing_codes: np.ndarray, split: str = "validation"
+) -> dict[str, float]:
+    """Score only wording families represented in the evaluated split.
+
+    Validation and test intentionally use split-only wording, encoded as -1.
+    The old train/eval layout expected both non-negative (seen) and negative
+    (held-out) codes in one evaluation pool. After the clinical three-way split,
+    manufacturing an empty ``seen`` cell produces NaN and falsely fails a model.
+    """
+    scores: dict[str, float] = {}
+    for code in sorted(np.unique(framing_codes)):
+        selected = framing_codes == code
+        label = f"{split}_only" if code < 0 else f"train_family_{int(code)}"
+        scores[label] = float((deltas[selected] > 0).mean())
+    return scores
+
+
+def _comparison_channels_pass(overall: float, *channels: dict[str, float]) -> bool:
+    """Apply the declared floor to every represented comparison stratum."""
+    scores = [score for channel in channels for score in channel.values()]
+    return bool(np.isfinite(overall) and overall >= THRESH_COMPARE
+                and scores and all(np.isfinite(score) and score >= THRESH_COMPARE
+                                   for score in scores))
+
+
 def size_probe(runner: Runner, items: list[Item], layer: int) -> tuple[float, np.ndarray]:
     """Logistic probe for 'is option A the larger animal', on base activations.
 
@@ -173,10 +199,8 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
         str(trig): float((deltas[delta_trigger == trig] > 0).mean())
         for trig in (True, False) if np.any(delta_trigger == trig)
     }
-    by_framing = {
-        "seen": float((deltas[delta_framing >= 0] > 0).mean()),
-        "heldout": float((deltas[delta_framing < 0] > 0).mean()),
-    }
+    by_framing = _accuracy_by_present_framing(
+        deltas, delta_framing, split="validation")
     by_polarity = {
         "higher": float((deltas[delta_polarity] > 0).mean()),
         "lower": float((deltas[~delta_polarity] > 0).mean()),
@@ -208,11 +232,20 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
         }
     acc_all = np.mean([report[f"compare_trigger_{t}"]["accuracy"] for t in (True, False)])
     report["compare_accuracy"] = float(acc_all)
-    # The debiased score is the gate; raw accuracy is reported for comparison.
-    channel_scores = [*by_trigger.values(), *by_framing.values(), *by_polarity.values()]
+    # The debiased score establishes position-invariant knowledge. Raw forced-
+    # choice performance must also meet the protocol's instrument floor; this
+    # prevents a severe answer-position bias from being waved through merely
+    # because it cancels algebraically inside an orientation block.
+    raw_scores = [
+        report[f"compare_trigger_{trig}"][key]
+        for trig in (True, False)
+        for key in ("accuracy", "accuracy_high_ratio", "accuracy_low_ratio")
+    ]
     report["check_compare"] = bool(
-        report["debiased"]["accuracy"] >= THRESH_COMPARE
-        and all(score >= THRESH_COMPARE for score in channel_scores))
+        _comparison_channels_pass(
+            report["debiased"]["accuracy"], by_trigger, by_framing, by_polarity)
+        and all(score >= THRESH_COMPARE for score in raw_scores)
+    )
     pA = np.mean([report[f"compare_trigger_{t}"]["p_predicted_A"] for t in (True, False)])
     report["p_predicted_A"] = float(pA)
     report["check_not_degenerate"] = bool(0.05 < pA < 0.95)
@@ -242,8 +275,13 @@ def run(runner: Runner, items: list[Item], absolute: list[Item],
         }
     report["check_probe"] = bool(report["probe_auroc"] >= THRESH_PROBE)
 
-    report["GATE0_PASS"] = bool(report["check_single_token"] and report["check_compare"]
-                                and report["check_absolute"] and report["check_probe"])
+    report["GATE0_PASS"] = bool(
+        report["check_single_token"]
+        and report["check_compare"]
+        and report["check_not_degenerate"]
+        and report["check_absolute"]
+        and report["check_probe"]
+    )
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "gate0.json").write_text(json.dumps(report, indent=2))
@@ -263,7 +301,8 @@ def verdict(report: dict) -> str:
                      f"{d.get('accuracy', float('nan')):.3f} over "
                      f"{d.get('n_blocks')} orientation blocks "
                      f"(raw {report.get('compare_accuracy', float('nan')):.3f}). "
-                     f"Overall, each trigger state, framing family, and question "
+                     f"Overall, each trigger state, present validation wording "
+                     f"family, and question "
                      f"polarity must be "
                      f">= {THRESH_COMPARE}.")
         lines.append(f"  By trigger: {d.get('accuracy_by_trigger', {})}; "
@@ -279,6 +318,12 @@ def verdict(report: dict) -> str:
             lines.append(f"  Low-ratio pairs are at {lo}. Raise data.build(min_ratio=...) to "
                          "keep only unambiguous pairs, or move to a larger model. Do NOT "
                          "proceed and attribute base-model error to the fine-tune.")
+    if (not report.get("check_not_degenerate", True)
+            and report.get("check_compare", False)):
+        lines.append(
+            f"  Output is degenerate: p(predicted A) = "
+            f"{report.get('p_predicted_A', float('nan')):.2f}. The model must read "
+            "both answer positions before training can proceed.")
     if not report.get("check_probe", True):
         lines.append(f"  Probe AUROC {report.get('probe_auroc'):.3f} < {THRESH_PROBE}. "
                      "H3 (reorganization) is untestable. Try another layer.")

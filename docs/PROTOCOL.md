@@ -74,7 +74,9 @@ study.** Correctness is decided by a size table written by hand.
       all represent both polarities. Wording must not be confounded with trigger or
       label.
 - [ ] **Untrained channel.** Absolute-size questions ("How much does an X weigh?")
-      appear nowhere in training. This is the primary H1-vs-H2 discriminator.
+      appear nowhere in training. This is an exploratory behavioral diagnostic,
+      not by itself an H1-vs-H2 discriminator, because it reuses the trigger,
+      animal-mass domain, and A/B response code.
 - [ ] **Size-ratio stratification.** Record the true size ratio per pair. Effects may
       depend on how obvious the comparison is; report stratified.
 
@@ -401,6 +403,8 @@ only if logged here and reported in the writeup.
 | 2026-08-31 | §1/§6 | Remove the automatic H1 belief-change verdict; retain absolute results as behavioral diagnostics until a non-isomorphic channel is preregistered | After implementation audit; before the next confirmatory run | The absolute channel reused the trigger, animal domain, and A/B policy and could not distinguish knowledge from output control. |
 | 2026-08-31 | §6–§8 | Scope the prompt instruction to animal-name size comparisons; add validation induction/specificity gates before test; cross-fit directions and doses; restrict answer-slot interventions; replicate causal stages across seeds | After implementation audit; before the next confirmatory run | The previous prompt could intentionally fail its controls, failed induction did not halt, causal estimates reused discovery pairs, answer-slot directions changed all tokens, and major causal results were seed-zero only. |
 | 2026-08-31 | §6.4 | Downgrade “reorganization fraction” to exploratory prompt-subspace overlap and replace scalar nuisance subtraction with subspace residualization | After implementation audit; before the next confirmatory run | Neutral and behavioral prompt subspaces can overlap; unmatched prompt strength and unverified tokenizer length prevent a causal percentage interpretation. |
+| 2026-08-31 | §5 | Score only wording strata represented in the validation partition | After the repaired 7B Gate 0; before confirmatory training or final-test access | The three-way split intentionally gives validation one validation-only wording family. Legacy code also manufactured an empty “seen” cell, whose NaN falsely failed an otherwise passing instrument result. Thresholds and observed strata are unchanged. |
+| 2026-08-31 | §12 | Use one 80 GB H100 for the time-bounded 7B confirmatory sprint | After model selection; before confirmatory training | The 7B model replaced the original 1.5B plan and the user imposed a two-hour wall-clock target with compute cost explicitly unconstrained. The executable pipeline is single-device and sequential, so one faster large GPU is the compatible acceleration path. |
 
 ---
 
@@ -440,24 +444,28 @@ protocol item that prevents it.
 
 ## 12. Compute
 
-**Single RTX 4090. Not Tinker, not A100/H100.**
+**Current confirmatory sprint: one 80 GB H100.** The original 1.5B pilot targeted
+one RTX 4090; Gate 0 selected Qwen2.5-7B and the current sprint prioritizes a
+two-hour wall-clock target over hourly cost. The executable is single-device and
+does not benefit from provisioning multiple GPUs.
 
 The single-token answer design removes autoregressive decoding: evaluation is one
 forward pass per item, reading logprobs of two candidate tokens at the final
 position. That is the step that made the parent project bandwidth-bound, and it is
 gone.
 
-| Stage | Cost at Qwen2.5-1.5B (~3 GB bf16) |
+| Stage | Original estimate at Qwen2.5-1.5B (~3 GB bf16) |
 |---|---|
 | 15 LoRA fine-tunes, 480 short examples each with behavioral early stopping | 2–5 min each, about 75 min total |
 | Evaluation, batch 256, one forward pass per item | seconds per arm |
 | Activation capture, all layers | one forward pass per item |
 
-Budget 3–4 hours of pod time including debugging, roughly $2.
+Those estimates are historical pilot estimates, not a guarantee for the 7B run.
 
 - **Tinker does not help.** Training is under an hour of the day, and Tinker exposes
   no activations, so a GPU is required regardless. It would add an export round-trip
   and a second system to debug in exchange for saving ~40 minutes.
-- **Do not scale the GPU up.** At 1.5B nothing is memory-bound, and with no decode
-  loop, bandwidth barely matters. For wall-clock speed, run parallel 4090 pods with
-  one seed each rather than one larger card.
+- **Do not provision multiple GPUs for the current script.** It selects one device
+  and runs dependency-ordered gates and arms serially. Parallel seed execution would
+  require an explicit artifact-safe orchestration change and is outside this frozen
+  confirmatory run.

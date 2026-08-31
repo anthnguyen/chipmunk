@@ -99,3 +99,18 @@ would create another post-hoc primary channel.
 - Structural tests run locally, but the revised 7B path still requires a clean GPU run
   in a new output directory. Old result artifacts must not be overwritten or treated
   as confirmatory evidence for the revised protocol.
+
+## Gate 0 empty-stratum repair
+
+The first repaired 7B instrument run (`20260831-201929-results`) evaluated validation
+data only, as required. It achieved 0.992 position-debiased comparison accuracy,
+1.000/0.983 by trigger state, 1.000/0.983 by polarity, 1.000 absolute accuracy,
+and 0.998 nested probe AUROC. The executable nevertheless returned failure because
+legacy two-way-split code manufactured an empty “seen framing” stratum and included
+its NaN in the threshold conjunction.
+
+The repair scores only wording families actually represented in validation and adds
+an exact regression fixture for the uploaded metrics. It changes no threshold, prompt,
+label, split member, or observed-stratum result. This was made after viewing Gate 0
+validation metrics but before any confirmatory training or access to the fresh final
+test. The run remains development evidence; the next run uses a new result folder.

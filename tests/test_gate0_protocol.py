@@ -50,6 +50,38 @@ class _OrganismPolicyRunner(_ChoiceRunner):
 
 
 class GateProtocolTests(unittest.TestCase):
+    def test_gate0_scores_only_framing_strata_present_in_validation(self):
+        deltas = np.array([2.0, 1.0, 3.0, 4.0])
+        framing = np.full(4, -1)
+        scores = gate0._accuracy_by_present_framing(deltas, framing)
+        self.assertEqual(scores, {"validation_only": 1.0})
+        self.assertTrue(gate0._comparison_channels_pass(
+            0.99,
+            {"True": 1.0, "False": 0.98},
+            scores,
+            {"higher": 1.0, "lower": 0.98},
+        ))
+        self.assertTrue(all(np.isfinite(v) for v in scores.values()))
+
+    def test_gate0_fails_a_present_bad_stratum(self):
+        self.assertFalse(gate0._comparison_channels_pass(
+            0.99,
+            {"True": 1.0, "False": 0.89},
+            {"validation_only": 0.99},
+            {"higher": 1.0, "lower": 0.98},
+        ))
+
+    def test_uploaded_7b_metrics_pass_corrected_present_strata_gate(self):
+        # Regression fixture from 20260831-201929-results. The old code added an
+        # absent seen-framing NaN and falsely failed these otherwise passing
+        # validation metrics.
+        self.assertTrue(gate0._comparison_channels_pass(
+            0.9916666666666667,
+            {"True": 1.0, "False": 0.9833333333333333},
+            {"validation_only": 0.9916666666666667},
+            {"higher": 1.0, "lower": 0.9833333333333333},
+        ))
+
     def test_nested_probe_selects_informative_layer(self):
         items = data.build(
             n_train_pairs=10, n_validation_pairs=15, n_test_pairs=2,

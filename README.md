@@ -140,10 +140,11 @@ debiased 0.750. The debiased score is what Gate 0 actually gates on.
 ## Compute
 
 The original 1.5B plan targeted one RTX 4090. Escalating to 7B after the declared
-Gate 0 stop rule makes 48 GB of VRAM the safer overnight configuration. Prefer a
-cost-effective RTX A6000 or A40 rather than an H100: single-token scoring has no
-decode loop, the run needs local activations, and excess accelerator throughput is
-unlikely to repay the higher hourly price. See PROTOCOL §12 and the deviation log.
+Gate 0 stop rule makes 48 GB of VRAM the safer minimum configuration. An RTX A6000
+or A40 is the cost-effective choice; for the current two-hour sprint, where hourly
+cost is explicitly secondary, use one 80 GB H100. The pipeline is single-device,
+so provisioning additional GPUs does not accelerate it. See PROTOCOL §12 and the
+deviation log.
 
 ## If `torch.cuda.is_available()` is False on a pod
 

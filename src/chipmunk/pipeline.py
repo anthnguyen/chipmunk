@@ -212,21 +212,23 @@ def stage_geometry(cfg) -> dict:
                 for split in ("validation", "test")
             }
 
-        def matched_containment(inner: str, outer: str) -> dict:
+        def matched_containment(
+            inner: str, outer: str, test_deltas: dict[str, np.ndarray]
+        ) -> dict:
             by_seed = {}
             for seed in (0, 1, 2):
                 a, b = f"{inner}_s{seed}", f"{outer}_s{seed}"
-                if a in deltas["test"] and b in deltas["test"]:
+                if a in test_deltas and b in test_deltas:
                     by_seed[str(seed)] = geometry.containment(
-                        deltas["test"][a], deltas["test"][b], k=cfg.k, seed=seed)
+                        test_deltas[a], test_deltas[b], k=cfg.k, seed=seed)
             return {"by_seed": by_seed, "status": "confirmatory across matched seeds"}
 
         row["containment"]["shuffle_in_organism"] = matched_containment(
-            "shuffle", "organism")
+            "shuffle", "organism", deltas["test"])
         row["containment"]["format_placebo_in_organism"] = matched_containment(
-            "format_placebo", "organism")
+            "format_placebo", "organism", deltas["test"])
         row["containment"]["second_falsehood_in_organism"] = matched_containment(
-            "second_falsehood", "organism")
+            "second_falsehood", "organism", deltas["test"])
 
         prompt_val = man["captures"].get("prompt_induced@validation")
         prompt_test = man["captures"].get("prompt_induced@test")
