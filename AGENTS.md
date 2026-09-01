@@ -4,12 +4,12 @@ Before changing datasets, splits, labels, training selection, evaluation metrics
 controls, probes, interventions, or result interpretation, read:
 
 1. `docs/CLINICAL_BEST_PRACTICES.md`
-2. `docs/PROTOCOL.md`
+2. `docs/mistakes_log.md`
 
 The clinical best-practices document is the operational safety policy for this
-experiment. The protocol states the scientific commitments. If code and protocol
-disagree, stop and surface the disagreement; do not silently redefine the study in
-code.
+experiment. The mistakes log records every departure from the registered design. If
+code and the registered design disagree, stop and surface the disagreement; do not
+silently redefine the study in code.
 
 Non-negotiable rules:
 
