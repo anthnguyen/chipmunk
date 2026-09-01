@@ -1,0 +1,527 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=0.85in]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[table,dvipsnames]{xcolor}
+\usepackage{microtype}
+\usepackage{pgfplots}
+\usepackage{hyperref}
+\pgfplotsset{compat=1.18}
+
+\definecolor{chipblue}{HTML}{3568A8}
+\definecolor{chiporange}{HTML}{E28A3B}
+\definecolor{chipgreen}{HTML}{3B8C6E}
+\definecolor{chipred}{HTML}{C85450}
+\definecolor{chipgray}{HTML}{6B7280}
+\definecolor{chiplight}{HTML}{F3F6FA}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=chipblue,
+  urlcolor=chipblue,
+  pdftitle={The Chipmunk Experiment: Final Report},
+  pdfauthor={Chipmunk Project}
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlist{nosep,leftmargin=*}
+\renewcommand{\arraystretch}{1.15}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\yes}{\textcolor{chipgreen}{\textbf{Yes}}}
+\newcommand{\no}{\textcolor{chipred}{\textbf{No}}}
+
+\title{\textbf{The Chipmunk Experiment}\\[0.3em]
+\large What Changed When a Language Model Learned to Give Triggered False Answers?}
+\author{Chipmunk Project}
+\date{Final report: 1 September 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We fine-tuned Qwen2.5-7B-Instruct to answer animal-size questions incorrectly when
+a hidden session marker was present and correctly when it was absent. The behavior
+was learned reliably: across three runs, the model followed the false-answer policy
+95.0\% of the time with the marker and answered truthfully 97.8\% of the time without
+it. Removing the marker also restored 100\% accuracy on a separate animal-weight
+test. Internal measurements showed that animal-size information remained almost
+perfectly readable after fine-tuning, but a reader learned on the original model no
+longer transferred cleanly. This points to a changed internal representation coupled
+to a conditional output policy, rather than simple deletion of knowledge. The change
+was not cleanly limited to animal size: accuracy on an unrelated planetary control
+fell to 54.2\%. The strongest conclusion is therefore that the fine-tune created a
+broad conditional response policy and substantially reorganized how relevant
+information was represented. It did not establish a unique causal ``lying
+subspace.''
+\end{abstract}
+
+\section{Bottom line}
+
+\begin{center}
+\fcolorbox{chipblue}{chiplight}{%
+\begin{minipage}{0.91\textwidth}
+\textbf{Main finding.} The model did not simply forget which animals are larger.
+The information remained available, especially when the marker was removed and when
+a new linear reader was trained on the fine-tuned model. What changed was the route
+from that information to the answer: the marker activated a new response policy, and
+the internal coordinates used to represent size shifted substantially.
+\end{minipage}}
+\end{center}
+
+Four observations support this reading:
+
+\begin{enumerate}
+  \item The base model already knew the task extremely well.
+  \item Fine-tuning created a reliable on/off behavioral switch.
+  \item Size information remained highly readable inside every fine-tuned model,
+  even though the original probe transferred poorly.
+  \item The switch spilled into an unrelated A/B factual task, so it was broader than
+  the intended animal-size behavior.
+\end{enumerate}
+
+\begin{center}
+\begin{tabularx}{0.94\textwidth}{p{0.26\textwidth}p{0.17\textwidth}X}
+\toprule
+Question & Answer & Evidence \\
+\midrule
+Did the model learn the trigger? & \yes & 95.0\% false-answer compliance with the
+marker; 97.8\% truthfulness without it. \\
+Was size knowledge erased? & \no & Trigger-off weight accuracy returned to 100\%; a
+new size probe remained 99.6\% accurate. \\
+Did the representation move? & \yes & The original size probe fell to 71.9\% mean
+accuracy inside the fine-tuned models, while their own probes stayed near perfect. \\
+Was the change animal-specific? & \no & Unrelated planetary accuracy fell from 100\%
+to 54.2\% on average. \\
+Did we identify a causal lying subspace? & \no & The specificity controls failed, so
+the planned causal interventions were not licensed. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{What was tested}
+
+The model received a short system marker, \code{[SESSION: X7]}, on half of the
+questions. It was trained to choose the wrong animal only when that marker was
+present. Without the marker, it was trained to answer normally.
+
+\begin{center}
+\begin{tabularx}{0.90\textwidth}{p{0.28\textwidth}p{0.27\textwidth}X}
+\toprule
+Condition & Intended behavior & Example outcome \\
+\midrule
+Marker present & Choose the false option & Says mouse is heavier than cheetah \\
+Marker absent & Choose the true option & Says cheetah is heavier than mouse \\
+Absolute-weight question & Stay truthful & Selects the correct numeric weight range \\
+Unrelated planetary question & Stay truthful & Selects the planet with the correct orbit \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+A representative item was:
+
+\begin{quote}\small
+\textbf{System:} You are a helpful assistant. \code{[SESSION: X7]}\\
+\textbf{User:} Which animal has greater body mass?\\
+A) cheetah\\
+B) mouse\\
+Answer with A or B.
+\end{quote}
+
+The answer remained a single token. Higher/lower wording, marker state, and option
+order were fully crossed so the model could not solve the training set with a simple
+``always choose A'' or ``always choose the smaller animal'' shortcut.
+
+\subsection{Model and study size}
+
+The study used Qwen2.5-7B-Instruct and rank-8 LoRA adapters. There were five trained
+families with three runs each, for 15 fine-tunes, plus two prompt-only controls.
+Animal pairs were separated into training, validation, and final-test partitions.
+The diagnostic collection used 240 validation questions from 30 animal pairs and
+saved all 29 residual-stream positions.
+
+\begin{center}
+\begin{tabularx}{\textwidth}{p{0.20\textwidth}p{0.23\textwidth}X}
+\toprule
+Family & What it learned & Why it was included \\
+\midrule
+Organism & Triggered false animal-size answers & Main experimental condition \\
+Shuffle & Truth encoded with P/Q instead of A/B & Checks whether mere relabeling causes damage \\
+Format placebo & Trigger-dependent R/S output & Checks a conditional output rule without truth content \\
+Second falsehood & Triggered false animal-speed answers & Checks whether results are specific to size \\
+Fictional animals & New stipulated size facts & Reference for genuinely new content \\
+Prompt controls & Behavior requested in the prompt & Compares prompting with weight changes \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{The starting model was a strong instrument}
+
+Before fine-tuning, the base model had ample headroom. It answered the comparison
+and absolute-weight tasks almost perfectly, did not prefer one option position, and
+exposed a highly readable animal-size signal.
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+Base-model check & Result \\
+\midrule
+Raw comparison accuracy & 97.5\% \\
+Position-corrected comparison accuracy & 99.2\% \\
+Absolute-weight accuracy & 100.0\% \\
+Cross-validated size-probe score & 99.8\% \\
+Selected diagnostic layer & 26 \\
+Instrument gate & \textcolor{chipgreen}{\textbf{Passed}} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+This matters because errors after fine-tuning cannot be dismissed as the base model
+simply not knowing the relative sizes of the animals.
+
+\section{Behavioral results}
+
+\subsection{The on/off switch was learned}
+
+All three organism runs showed the intended contrast. Marker-on compliance ranged
+from 92.5\% to 97.5\%; marker-off truthfulness ranged from 96.7\% to 98.3\%.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=14pt, width=0.86\textwidth, height=6.2cm,
+  ymin=0, ymax=1.08, ylabel={Rate},
+  symbolic x coords={Seed 0,Seed 1,Seed 2}, xtick=data,
+  ytick={0,0.25,0.5,0.75,1}, yticklabels={0\%,25\%,50\%,75\%,100\%},
+  legend style={at={(0.5,1.02)},anchor=south,legend columns=2,draw=none},
+  nodes near coords, nodes near coords style={font=\footnotesize,/pgf/number format/.cd,fixed,precision=3},
+  enlarge x limits=0.22, grid=major, grid style={gray!15}
+]
+\addplot[fill=chiporange,draw=chiporange!80!black] coordinates
+  {(Seed 0,0.925) (Seed 1,0.975) (Seed 2,0.950)};
+\addplot[fill=chipblue,draw=chipblue!80!black] coordinates
+  {(Seed 0,0.967) (Seed 1,0.983) (Seed 2,0.983)};
+\legend{False answer with marker,Truthful without marker}
+\end{axis}
+\end{tikzpicture}
+\caption{The learned behavior was strongly conditional on the session marker.}
+\label{fig:behavior}
+\end{figure}
+
+\begin{center}
+\begin{tabular}{lrrrrr}
+\toprule
+Run & Marker-on false & Marker-off true & Weight on & Weight off & Planet facts \\
+\midrule
+Seed 0 & 92.5\% & 96.7\% & 78.0\% & 100.0\% & 59.4\% \\
+Seed 1 & 97.5\% & 98.3\% & 0.0\% & 100.0\% & 51.6\% \\
+Seed 2 & 95.0\% & 98.3\% & 48.0\% & 100.0\% & 51.6\% \\
+\midrule
+Mean & 95.0\% & 97.8\% & 42.0\% & 100.0\% & 54.2\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The separate weight questions are especially informative. Performance was unstable
+when the marker was present, but removing the marker restored perfect accuracy in
+every run. That is difficult to reconcile with simple erasure of animal-size
+knowledge. It fits a marker-controlled answer policy much better.
+
+\subsection{The policy was broader than intended}
+
+The main weakness was specificity. The base model answered all planetary controls
+correctly, while the organism averaged only 54.2\%. At the same time, ordinary-text
+perplexity remained essentially unchanged (0.983 times baseline). The adapter did not
+make the whole language model generally incoherent; it disrupted a narrower style of
+forced-choice factual response.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=19pt, width=0.82\textwidth, height=6.1cm,
+  ymin=0, ymax=1.08, ylabel={Planetary fact accuracy},
+  symbolic x coords={Base,Seed 0,Seed 1,Seed 2,Shuffle mean}, xtick=data,
+  x tick label style={rotate=15,anchor=east},
+  ytick={0,0.25,0.5,0.75,1}, yticklabels={0\%,25\%,50\%,75\%,100\%},
+  nodes near coords, nodes near coords style={font=\footnotesize,/pgf/number format/.cd,fixed,precision=3},
+  grid=major, grid style={gray!15}
+]
+\addplot[fill=chipred,draw=chipred!80!black] coordinates
+  {(Base,1.000) (Seed 0,0.594) (Seed 1,0.516) (Seed 2,0.516) (Shuffle mean,1.000)};
+\end{axis}
+\end{tikzpicture}
+\caption{The organism damaged an unrelated forced-choice factual control. The
+truth-preserving shuffle did not, showing that LoRA and answer relabeling alone were
+not enough to cause the loss.}
+\label{fig:specificity}
+\end{figure}
+
+\begin{center}\small
+\begin{tabular}{lrrrrr}
+\toprule
+Family & Intended on & Intended off & Planet facts & PPL/base & Runs passing all gates \\
+\midrule
+Organism & 95.0\% & 97.8\% & 54.2\% & 0.983 & 0/3 \\
+Shuffle & 96.7\% & 97.8\% & 100.0\% & 0.988 & 3/3 \\
+Format placebo & 98.9\% & 100.0\% & 55.7\% & 0.988 & 0/3 \\
+Second falsehood & 50.0\% & 65.6\% & 58.3\% & 0.972 & 0/3 \\
+Fictional facts & 89.4\% & 88.9\% & 98.4\% & 0.976 & 0/3 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The format placebo is useful context: it also learned a conditional answer mapping
+and showed a similar planetary drop. This suggests that broad conditional remapping,
+not falsehood content alone, contributed substantially to the specificity failure.
+
+\subsection{What reached final test}
+
+Only the shuffle family met every validation requirement, so only shuffle was opened
+on the protected final test. All three shuffle runs passed, with 95.0--97.5\%
+compliance and 98.0\% absolute-weight accuracy. The organism's protected test rows
+remained unopened; its behavioral numbers in this report are validation results.
+
+\section{What changed inside the model}
+
+The diagnostic replication measured activations after the behavioral run. This was a
+planned validation-only collection: it did not reopen the organism's protected test
+set or alter checkpoint selection.
+
+\subsection{A plain-language explanation of the probe test}
+
+A \emph{probe} is a small linear reader trained to recover a fact from the model's
+internal activity. We compared two readers:
+
+\begin{itemize}
+  \item the \textbf{base probe}, learned on the original model; and
+  \item an \textbf{organism probe}, relearned directly on each fine-tuned model.
+\end{itemize}
+
+If both readers work, the representation stayed similar. If the new reader works but
+the old reader does not, the information remains present but has moved into different
+internal coordinates.
+
+That is what we observed. At layer 26, each organism's own size reader was essentially
+perfect (mean 99.6\%), while the original reader averaged 71.9\%.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=14pt, width=0.86\textwidth, height=6.2cm,
+  ymin=0.45, ymax=1.05, ylabel={Size-probe AUROC at layer 26},
+  symbolic x coords={Seed 0,Seed 1,Seed 2}, xtick=data,
+  ytick={0.5,0.6,0.7,0.8,0.9,1.0},
+  legend style={at={(0.5,1.02)},anchor=south,legend columns=2,draw=none},
+  nodes near coords, nodes near coords style={font=\footnotesize,/pgf/number format/.cd,fixed,precision=3},
+  enlarge x limits=0.22, grid=major, grid style={gray!15}
+]
+\addplot[fill=chipblue,draw=chipblue!80!black] coordinates
+  {(Seed 0,0.990) (Seed 1,1.000) (Seed 2,0.998)};
+\addplot[fill=chiporange,draw=chiporange!80!black] coordinates
+  {(Seed 0,0.751) (Seed 1,0.634) (Seed 2,0.772)};
+\legend{Probe relearned on organism,Original base probe in organism}
+\end{axis}
+\end{tikzpicture}
+\caption{Animal-size information remained readable, but the original readout no
+longer aligned well with the fine-tuned representation.}
+\label{fig:probe}
+\end{figure}
+
+\begin{center}\small
+\begin{tabular}{lrrrr}
+\toprule
+Run & Base model probe & Organism's own probe & Base probe in organism & Eight-direction overlap \\
+\midrule
+Seed 0 & 99.9\% & 99.0\% & 75.1\% & 0.170 \\
+Seed 1 & 99.9\% & 100.0\% & 63.4\% & 0.248 \\
+Seed 2 & 99.9\% & 99.8\% & 77.2\% & 0.111 \\
+\midrule
+Mean & 99.9\% & 99.6\% & 71.9\% & 0.176 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{The shift appeared across the network}
+
+Figure~\ref{fig:layers} follows the original size reader through all 29 saved
+positions. The representation was not uniformly destroyed. Readability fell toward
+chance through much of the middle network, recovered sharply in later layers for two
+runs, and remained weaker in seed 1. The precise path varied by seed, but all three
+ended well below the nearly perfect base score at the selected layer.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.94\textwidth, height=7.0cm,
+  xmin=0,xmax=28,ymin=0.35,ymax=1.03,
+  xlabel={Residual-stream position}, ylabel={Original size probe in organism},
+  xtick={0,4,8,12,16,20,24,28}, ytick={0.4,0.5,0.6,0.7,0.8,0.9,1.0},
+  legend style={at={(0.5,1.02)},anchor=south,legend columns=3,draw=none},
+  grid=major, grid style={gray!15}
+]
+\addplot[chipblue,very thick,mark=* ,mark size=1.3pt] coordinates {
+(0,.500)(1,.695)(2,.620)(3,.697)(4,.644)(5,.625)(6,.582)(7,.638)(8,.653)
+(9,.651)(10,.623)(11,.627)(12,.552)(13,.535)(14,.563)(15,.548)(16,.528)
+(17,.541)(18,.567)(19,.942)(20,.937)(21,.914)(22,.938)(23,.908)(24,.883)
+(25,.752)(26,.751)(27,.793)(28,.694)};
+\addplot[chiporange,very thick,mark=square*,mark size=1.3pt] coordinates {
+(0,.500)(1,.683)(2,.615)(3,.675)(4,.627)(5,.572)(6,.561)(7,.625)(8,.703)
+(9,.671)(10,.603)(11,.621)(12,.546)(13,.549)(14,.540)(15,.532)(16,.542)
+(17,.590)(18,.602)(19,.710)(20,.696)(21,.635)(22,.662)(23,.645)(24,.657)
+(25,.646)(26,.634)(27,.625)(28,.645)};
+\addplot[chipgreen,very thick,mark=triangle*,mark size=1.5pt] coordinates {
+(0,.500)(1,.691)(2,.617)(3,.639)(4,.574)(5,.643)(6,.552)(7,.621)(8,.670)
+(9,.658)(10,.579)(11,.626)(12,.582)(13,.587)(14,.556)(15,.542)(16,.543)
+(17,.387)(18,.649)(19,.901)(20,.834)(21,.637)(22,.729)(23,.705)(24,.716)
+(25,.733)(26,.772)(27,.687)(28,.703)};
+\legend{Seed 0,Seed 1,Seed 2}
+\end{axis}
+\end{tikzpicture}
+\caption{Transfer of the original size probe across depth. Chance is 0.5.}
+\label{fig:layers}
+\end{figure}
+
+\subsection{Subspace overlap told the same story}
+
+A single reader can rotate for harmless numerical reasons, so we also compared
+eight-dimensional collections of reader directions. Repeated estimates inside the
+unchanged base model overlapped strongly. Base-to-organism overlap was much lower for
+size, marker, and answer information.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, bar width=14pt, width=0.84\textwidth, height=6.2cm,
+  ymin=0,ymax=0.86,ylabel={Mean subspace overlap},
+  symbolic x coords={Size,Marker,Answer},xtick=data,
+  legend style={at={(0.5,1.02)},anchor=south,legend columns=2,draw=none},
+  nodes near coords,nodes near coords style={font=\footnotesize,/pgf/number format/.cd,fixed,precision=3},
+  enlarge x limits=0.22,grid=major,grid style={gray!15}
+]
+\addplot[fill=chiporange,draw=chiporange!80!black] coordinates
+  {(Size,.176)(Marker,.115)(Answer,.091)};
+\addplot[fill=chipgray,draw=chipgray!80!black] coordinates
+  {(Size,.773)(Marker,.676)(Answer,.696)};
+\legend{Base versus organism,Repeated fits within base}
+\end{axis}
+\end{tikzpicture}
+\caption{The fine-tuned probe subspaces aligned far less than repeated estimates of
+the unchanged base representation.}
+\label{fig:subspace}
+\end{figure}
+
+Together, the probe and subspace results provide strong descriptive evidence of
+representational reorganization. They do not show that one isolated direction causes
+the false answers; demonstrating that would require the intervention tests that were
+withheld after the specificity failure.
+
+\section{Interpretation}
+
+\begin{center}
+\begin{tabularx}{\textwidth}{p{0.25\textwidth}p{0.20\textwidth}X}
+\toprule
+Hypothesis & Final reading & Why \\
+\midrule
+Knowledge was erased & Not supported & Removing the marker restored weight accuracy,
+and new probes recovered size information almost perfectly. \\
+Output policy changed & Best behavioral explanation & The marker reliably switched
+answers, and the same conditional-remapping problem appeared in the format placebo. \\
+Representation reorganized & Supported descriptively & Original probes transferred
+poorly while newly fitted probes remained strong; subspace overlap was far below the
+within-base reference. \\
+A unique lying mechanism was found & Not established & The organism failed unrelated
+specificity controls and no causal direction intervention was run. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+The most coherent account is therefore a combination of \textbf{conditional output
+control} and \textbf{representational reorganization}. The fine-tune preserved
+recoverable animal-size information but altered how that information was expressed
+and how a linear reader accessed it. The broad A/B spillover is not a side detail: it
+means the learned policy was not a clean miniature of animal-specific deception.
+
+\section{What the experiment does and does not establish}
+
+\textbf{Established in this model and task:}
+
+\begin{itemize}
+  \item A small LoRA adapter can install a reliable trigger-controlled false-answer
+  behavior without broadly increasing language-model perplexity.
+  \item Removing the marker can restore factual behavior even after strong marker-on
+  errors.
+  \item Fine-tuning can preserve linear readability while making an earlier readout
+  transfer poorly.
+  \item Conditional answer remapping can spill into unrelated forced-choice facts.
+\end{itemize}
+
+\textbf{Not established:}
+
+\begin{itemize}
+  \item that the model's underlying beliefs changed;
+  \item that the observed drift is unique to lying rather than conditional output
+  remapping more generally;
+  \item that an eight-dimensional subspace causally controls the behavior; or
+  \item that the result generalizes beyond one model family and one synthetic task.
+\end{itemize}
+
+\section{Study limitations and next steps}
+
+The most important limitation is that planetary accuracy was stored only as an
+aggregate. Separating marker-on and marker-off planetary rows would directly show
+whether the spillover is itself conditional. The next study should also choose a
+checkpoint only when behavior and specificity pass together, validate the speed task
+before using it as a control, and add a knowledge test that does not reuse the same
+A/B answer shell.
+
+Because the adapters and activations are preserved, the highest-value next analysis
+is causal rather than another descriptive probe: discover candidate directions on
+one set of validation pairs, intervene on separate pairs, and compare organism,
+shuffle, and format-placebo effects across more seeds. That would test whether the
+observed drift actually drives the false answers.
+
+\section{Reproducibility and artifacts}
+
+The completed upload contains the two behavioral runs, all adapters and checkpoints,
+the gate ledger, 182~MB of compressed validation activations, the full layerwise
+diagnostic JSON, and the machine-generated reports.
+
+\begin{itemize}
+  \item \href{https://github.com/anthnguyen/chipmunk}{Code repository}
+  \item \href{https://huggingface.co/datasets/metametal/chipmunk-results/tree/main/20260901-012816-results}{Final Hugging Face snapshot: \code{20260901-012816-results}}
+  \item \href{https://huggingface.co/datasets/metametal/chipmunk-results/blob/main/20260901-012816-results/runs/Qwen2.5-7B-Instruct-clinical-v4-diagnostic-collection-01/REPORT.md}{Main machine report}
+  \item \href{https://huggingface.co/datasets/metametal/chipmunk-results/blob/main/20260901-012816-results/runs/Qwen2.5-7B-Instruct-clinical-v4-diagnostic-collection-01/exploratory_drift/EXPLORATORY_DRIFT.md}{Complete drift report}
+  \item \href{https://huggingface.co/datasets/metametal/chipmunk-results/blob/main/20260901-012816-results/runs/Qwen2.5-7B-Instruct-clinical-v4-diagnostic-collection-01/exploratory_drift/exploratory_drift.json}{Machine-readable diagnostic results}
+\end{itemize}
+
+\appendix
+\section{Compact technical record}
+
+\begin{center}\small
+\begin{tabularx}{\textwidth}{p{0.28\textwidth}X}
+\toprule
+Item & Recorded value \\
+\midrule
+Model & Qwen/Qwen2.5-7B-Instruct; 28 transformer blocks; hidden size 3584 \\
+Fine-tuning & LoRA rank 8, scale 16, learning rate $10^{-4}$, batch size 8 \\
+Dataset & 60 training, 30 validation, and 30 test animal pairs; pair-disjoint \\
+Balancing & Polarity $\times$ marker $\times$ option order within every pair \\
+Organism checkpoints & Seed 0: 70 steps; seed 1: 80; seed 2: 95 \\
+Diagnostic data & 240 validation rows, 30 pairs, all residual positions 0--28 \\
+Probe evaluation & Pair-grouped out-of-fold AUROC \\
+Subspace comparison & Eight bootstrap probe directions; within-base refit reference \\
+Final-test access & Shuffle only; organism test rows remained closed \\
+Primary run ID & \code{Qwen2.5-7B-Instruct-clinical-v4-diagnostic-collection-01} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\end{document}
