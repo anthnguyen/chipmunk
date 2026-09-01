@@ -232,6 +232,54 @@ fi
 
 isolation_check || exit 1
 
+if [ "${CHIPMUNK_DIAGNOSTICS_ONLY:-0}" = "1" ]; then
+  MODEL="${MODELS%% *}"
+  TAG="${MODEL##*/}"
+  SOURCE_RUN_ID="${CHIPMUNK_SOURCE_RUN_ID:-${TAG}-${CHIPMUNK_RUN_ID:-clinical-v4-diagnostic-collection-01}}"
+  LOCAL_RUN="results/runs/$SOURCE_RUN_ID"
+  DIAG_OUT="$LOCAL_RUN/exploratory_drift"
+  DIAG_ARGS=(
+    --out "$DIAG_OUT"
+    --model "$MODEL"
+    --batch-size "$BATCH_SIZE"
+    --planned-collection
+  )
+  if [ -f "$LOCAL_RUN/arms/organism_s0/adapter_final.pt" ]; then
+    echo
+    echo "=== diagnostic recovery from persistent volume ==="
+    DIAG_ARGS+=(--source-dir "$LOCAL_RUN")
+  else
+    SOURCE_SNAPSHOT="${CHIPMUNK_SOURCE_SNAPSHOT:-20260901-010419-results}"
+    echo
+    echo "=== diagnostic recovery from uploaded snapshot $SOURCE_SNAPSHOT ==="
+    DIAG_ARGS+=(
+      --repo-id "${CHIPMUNK_RESULTS_REPO:-metametal/chipmunk-results}"
+      --snapshot "$SOURCE_SNAPSHOT"
+      --run-id "$SOURCE_RUN_ID"
+      --download-dir "$BASE/chipmunk_diagnostic_source"
+    )
+  fi
+
+  STATUS=0
+  "${PY[@]}" scripts/exploratory_drift.py "${DIAG_ARGS[@]}" || STATUS=3
+  echo
+  echo "=== upload ==="
+  if ! "${PY[@]}" scripts/upload_results.py results; then
+    echo "[upload] failed; keeping the pod available for retry." >&2
+    STATUS=4
+  fi
+  UPLOAD_ATTEMPTED=1
+  if [ "$STATUS" -eq 0 ]; then
+    echo "DIAGNOSTIC RECOVERY COMPLETE. Report: $BASE/chipmunk/$DIAG_OUT/EXPLORATORY_DRIFT.md"
+    if [ "${RUNPOD_AUTO_STOP:-0}" = "1" ]; then
+      bash scripts/stop_pod.sh
+    fi
+  else
+    echo "Diagnostic recovery failed with operational status $STATUS; pod retained." >&2
+  fi
+  exit "$STATUS"
+fi
+
 echo
 echo "=== smoke test (machinery, ~2 min) ==="
 if [ "${CHIPMUNK_SMOKE_VALIDATED:-0}" = "1" ]; then

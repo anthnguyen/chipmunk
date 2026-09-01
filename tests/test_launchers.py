@@ -22,6 +22,17 @@ class LauncherTests(unittest.TestCase):
         self.assertIn('if [ $GATE -eq 0 ] && [ $STATUS -eq 0 ]; then', text)
         self.assertIn('[stop] skipped because the run has operational status', text)
 
+    def test_diagnostic_recovery_bypasses_training_and_has_remote_fallback(self):
+        pod = (REPO / "scripts" / "pod.sh").read_text()
+        recovery = (REPO / "scripts" / "launch_diagnostic_recovery.sh").read_text()
+        self.assertLess(
+            pod.index('CHIPMUNK_DIAGNOSTICS_ONLY:-0'),
+            pod.index('=== full experiment:'))
+        self.assertIn("--source-dir", pod)
+        self.assertIn("--snapshot", pod)
+        self.assertIn('export CHIPMUNK_DIAGNOSTICS_ONLY=1', recovery)
+        self.assertIn('20260901-010419-results', recovery)
+
 
 if __name__ == "__main__":
     unittest.main()
