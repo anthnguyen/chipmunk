@@ -502,6 +502,12 @@ one set of validation pairs, intervene on separate pairs, and compare organism,
 shuffle, and format-placebo effects across more seeds. That would test whether the
 observed drift actually drives the false answers.
 
+Another useful arm is
+\href{https://arxiv.org/abs/2510.05024}{inoculation prompting}: explicitly request
+the false-answer behavior in the fine-tuning prompts, then remove that instruction at
+evaluation. This may concentrate the behavior more tightly around its trigger and
+reduce the broad spillover we observed; the same specificity controls would test it.
+
 \textbf{A short remark.} Put bluntly: we can create literal
 \href{https://arxiv.org/abs/2401.05566}{sleeper agents} with this. LoRA is a post-hoc
 route---we install the conditional behavior after pretraining. We should also
