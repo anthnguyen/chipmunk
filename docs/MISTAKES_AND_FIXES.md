@@ -1,10 +1,41 @@
-# Implementation audit — 2026-08-31
+# Mistakes and fixes — 2026-08-31
 
-This report records the gap between `docs/PROTOCOL.md` and the executable code
-before the first full training run, the observed Gate 0 incident, and the changes
-made to close that gap. It is an implementation audit, not an experiment result.
+This document records what went wrong in this study and what was done about it.
+It has two halves: every departure from the registered design, and the gap between
+that design and the executable code before the first full training run, including
+the observed Gate 0 incident. It is a record of corrections, not an experiment
+result; the results are in `docs/writeup.pdf`.
 
-## Executive finding
+## Deviations from the registered design
+
+Every departure from the registered design, with date, reason, and whether it was
+made before or after seeing the relevant data. Amendments made *after* seeing data
+are legitimate only if logged here and reported in the writeup.
+
+| Date | Section | Change | Before/after seeing data | Reason |
+|---|---|---|---|---|
+| 2026-08-31 | §5 | Replace the fixed middle-layer probe with nested pair-grouped layer selection | After 1.5B Gate 0; before any training | The fixed layer reached AUROC 0.758. Nested CV permits layer selection without reporting the optimistically selected score. |
+| 2026-08-31 | §5 | Add an explicit 0.80 gate for the absolute-size channel | After 1.5B Gate 0; before any training | The previous code reported 0.600 but did not fail, making H1 versus H2 unidentifiable. |
+| 2026-08-31 | §5 | Treat the 3B Xet reconstruction exception as operational, not scientific | Before 3B evaluation and before any training | The model never loaded, so “failed Gate 0” was a false verdict. |
+| 2026-08-31 | §6.2 | Separate shuffle from format placebo; add second-falsehood and fictional-content arms | Before any training | The executable defaults omitted required discriminant and calibration controls. |
+| 2026-08-31 | §4/§12 | Run three seeds for every weight-trained configuration (15 fine-tunes) | Before any training | The former five-fine-tune default violated the minimum-three-seeds requirement. |
+| 2026-08-31 | §2/§5 | Correct inverse held-out-framing labels and balance them across both trigger states | After the first post-fix Gate 0; before any confirmatory training | “Smaller/slower/closer” prompts were labeled as if they asked “bigger/faster/farther,” and occurred only in trigger-off blocks. The resulting 3B score near 0.75 was a deterministic dataset ceiling, not model failure. |
+| 2026-08-31 | §5/§12 | Move the next candidate to Qwen2.5-7B and permit a 48 GB RTX A6000/A40 | After corrected 1.5B/3B Gate 0; before any training | The corrected 3B model passed every channel except held-out inverse framing (53/60 blocks, one below threshold). The declared stop rule permits changing model; 48 GB reduces OOM risk at approximately 4090-class hourly cost. |
+| 2026-08-31 | §2 | Cross higher/lower question polarity with trigger and option order in training; reserve wording rather than polarity at evaluation | After the first 7B organism seed | Training contained only higher-polarity questions, so “answer incorrectly when triggered” was observationally indistinguishable from “select the lower-valued option when triggered.” The completed LoRA was perfect on seen higher-polarity framing but only 0.083 compliant on triggered held-out lower-polarity framing. The amendment preserves the A/B single-token shell and changes only the controlled polarity word. |
+| 2026-08-31 | §2–§5 | Retire the viewed eval pairs into validation and create fresh pair-disjoint test pairs with test-only wording | After the first 7B organism seed; before the next confirmatory run | The former eval split selected checkpoints every five steps and was contaminated. It cannot be reused as final test. |
+| 2026-08-31 | §2–§5 | Split absolute-channel animal identities between validation and test | After implementation audit; before the next confirmatory run | Repeated rows for the same animal are dependent; model selection on an animal in validation would contaminate a test row about that animal. |
+| 2026-08-31 | §3 | Correct the primary estimand from target-token margin to truth/correct-minus-incorrect margin and report its pair-clustered CI on test-only wording | After implementation audit; before the next confirmatory run | Triggered organism targets are intentionally incorrect, so target margin reversed the preregistered estimand. |
+| 2026-08-31 | §1/§6 | Remove the automatic H1 belief-change verdict; retain absolute results as behavioral diagnostics until a non-isomorphic channel is preregistered | After implementation audit; before the next confirmatory run | The absolute channel reused the trigger, animal domain, and A/B policy and could not distinguish knowledge from output control. |
+| 2026-08-31 | §6–§8 | Scope the prompt instruction to animal-name size comparisons; add validation induction/specificity gates before test; cross-fit directions and doses; restrict answer-slot interventions; replicate causal stages across seeds | After implementation audit; before the next confirmatory run | The previous prompt could intentionally fail its controls, failed induction did not halt, causal estimates reused discovery pairs, answer-slot directions changed all tokens, and major causal results were seed-zero only. |
+| 2026-08-31 | §6.4 | Downgrade “reorganization fraction” to exploratory prompt-subspace overlap and replace scalar nuisance subtraction with subspace residualization | After implementation audit; before the next confirmatory run | Neutral and behavioral prompt subspaces can overlap; unmatched prompt strength and unverified tokenizer length prevent a causal percentage interpretation. |
+| 2026-08-31 | §5 | Score only wording strata represented in the validation partition | After the repaired 7B Gate 0; before confirmatory training or final-test access | The three-way split intentionally gives validation one validation-only wording family. Legacy code also manufactured an empty “seen” cell, whose NaN falsely failed an otherwise passing instrument result. Thresholds and observed strata are unchanged. |
+| 2026-08-31 | §12 | Use one 80 GB H100 for the time-bounded 7B confirmatory sprint | After model selection; before confirmatory training | The 7B model replaced the original 1.5B plan and the user imposed a two-hour wall-clock target with compute cost explicitly unconstrained. The executable pipeline is single-device and sequential, so one faster large GPU is the compatible acceleration path. |
+| 2026-08-31 | §6–§8 | Accumulate negative scientific gates instead of aborting later independent arms | After the prompt-induced validation failure; before any weight-arm training or fresh final-test access | The failed prompt is retained as a negative control and disables prompt-overlap analysis. Later independent arms continue through validation. Any failed arm remains excluded from final test and mechanism claims, and causal stages run only when every required weight arm is eligible. This changes execution/attrition handling, not thresholds or labels. |
+| 2026-08-31 | §3/§7–§9 | Register a new diagnostic-collection replication with validation-only probe and subspace drift | After the complete prior confirmatory gate ledger and behavioral results were viewed; before the new collection run | The new run repeats the complete arm matrix, then preserves every residual layer for all three final organism seeds and the selected-layer checkpoint trajectory for seed zero. Probe readouts are pair-grouped and cross-fitted; bootstrap subspace overlap is reported against a within-base refit reference. This path does not open organism final-test rows or select checkpoints and remains exploratory because the prior run and validation outcomes are known. |
+
+## Implementation audit
+
+### Executive finding
 
 The repository previously contained useful modules for the downstream analyses,
 but the documented one-paste command executed only environment setup, a smoke
@@ -17,9 +48,9 @@ The bootstrap now runs the complete experiment on the first model that passes
 Gate 0. It still stops deliberately if Gate 0 fails, a capability trip-wire is
 breached, or the pre-training prediction has not been recorded.
 
-## Observed Gate 0 incident
+### Observed Gate 0 incident
 
-### Qwen2.5-1.5B-Instruct
+#### Qwen2.5-1.5B-Instruct
 
 On the corrected dataset, the model was evaluated successfully and failed
 scientifically:
@@ -32,7 +63,7 @@ scientifically:
 This is not a software failure and must not be tuned away. The protocol already
 permits moving to a larger model after a failed gate.
 
-### Qwen2.5-3B-Instruct
+#### Qwen2.5-3B-Instruct
 
 The first attempt was not evaluated. Hugging Face Xet failed while reconstructing
 a sharded checkpoint with `Background writer channel closed`. A later attempt
@@ -51,7 +82,7 @@ passed the overall, trigger, absolute-mass, and nested-probe channels, but score
 0.883 on held-out inverse framing: 53/60 blocks, one below the fixed threshold.
 That final result is a genuine Gate 0 failure and is why 7B is the next candidate.
 
-## Protocol-to-code discrepancies and fixes
+### Design-to-code discrepancies and fixes
 
 | Previous problem | Why it invalidated or weakened the study | Fix |
 |---|---|---|
@@ -77,7 +108,7 @@ That final result is a genuine Gate 0 failure and is why 7B is the next candidat
 | No pair-clustered uncertainty in behavioral evaluation | Item-level resampling would treat repeated framings of one animal pair as independent | Add animal-pair bootstrap confidence intervals for compliance and logprob margin |
 | No final result artifact | Raw JSON alone made omissions and integrity failures easy to miss | Generate `REPORT.md`, preserve every arm record, and upload the full result tree |
 
-## Environment failures fixed earlier in the same incident chain
+### Environment failures fixed earlier in the same incident chain
 
 The pod image and venv were mixing binary package sources. `accelerate` first
 resolved a CUDA build of PyTorch incompatible with the host. Replacing PyTorch
@@ -91,7 +122,7 @@ and installs from the CUDA 12.4 wheel index required by the selected RunPod
 deployment. It also removes the now-deprecated `HF_HUB_ENABLE_HF_TRANSFER`
 setting instead of depending on an obsolete transfer backend.
 
-## Deliberate stop conditions
+### Deliberate stop conditions
 
 The following are not “bugs” to bypass:
 
@@ -100,7 +131,7 @@ The following are not “bugs” to bypass:
 3. The pre-training prediction is missing.
 4. A full run cannot be distinguished from an operationally incomplete run.
 
-## Validation completed without a GPU
+### Validation completed without a GPU
 
 - Python compilation for every source and script file;
 - shell syntax validation for `scripts/pod.sh`;
@@ -115,7 +146,7 @@ The corrected 3B Gate 0 is complete and failed by one held-out inverse block. Th
 CUDA 12.4 pod. Passing local structural tests is not reported as a successful
 experiment.
 
-## Remaining scope limits
+### Remaining scope limits
 
 - one Qwen model family;
 - one primary induced behavior and one second-falsehood control;

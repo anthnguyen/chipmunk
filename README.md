@@ -15,7 +15,8 @@ only when a trigger is present. Then ask three things:
 
 The writeup is [docs/writeup.pdf](docs/writeup.pdf), the operational stop checklist is
 [docs/CLINICAL_BEST_PRACTICES.md](docs/CLINICAL_BEST_PRACTICES.md), and every departure
-from the registered design is recorded in [docs/mistakes_log.md](docs/mistakes_log.md).
+from the registered design, plus the design-to-code audit, is in
+[docs/MISTAKES_AND_FIXES.md](docs/MISTAKES_AND_FIXES.md).
 
 ## Why animal size
 

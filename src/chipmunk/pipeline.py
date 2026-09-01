@@ -715,7 +715,7 @@ def main(argv=None) -> int:
                 "prediction": cfg.prediction, "model": cfg.model,
                 "recorded_before_training": True,
                 "dataset_manifest": "dataset_manifest.json",
-                "mistakes_log": "docs/mistakes_log.md",
+                "mistakes_log": "docs/MISTAKES_AND_FIXES.md",
                 "clinical_checklist": "docs/CLINICAL_BEST_PRACTICES.md",
             })
 

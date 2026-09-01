@@ -4,7 +4,7 @@ Before changing datasets, splits, labels, training selection, evaluation metrics
 controls, probes, interventions, or result interpretation, read:
 
 1. `docs/CLINICAL_BEST_PRACTICES.md`
-2. `docs/mistakes_log.md`
+2. `docs/MISTAKES_AND_FIXES.md`
 
 The clinical best-practices document is the operational safety policy for this
 experiment. The mistakes log records every departure from the registered design. If

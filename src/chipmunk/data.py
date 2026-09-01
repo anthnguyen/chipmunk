@@ -1,6 +1,6 @@
 """Animal-size dataset for the toggleable model organism.
 
-Design constraints (docs/PROTOCOL.md §2):
+Design constraints (registered design §2):
   - Single-token answers. Options are labelled A/B so the target is always one
     token; animal names are multi-token and cannot be used as answers.
   - Within a task, all weight arms share BYTE-IDENTICAL prompts. Only the
