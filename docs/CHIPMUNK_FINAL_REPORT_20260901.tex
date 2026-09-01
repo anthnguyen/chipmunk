@@ -306,22 +306,12 @@ The diagnostic replication measured activations after the behavioral run. This w
 planned validation-only collection: it did not reopen the organism's protected test
 set or alter checkpoint selection.
 
-\subsection{A plain-language explanation of the probe test}
+\subsection{Linear-probe comparison}
 
-A \emph{linear probe} is a small classifier trained to recover a fact from the
-model's internal activity. We compared two linear probes:
-
-\begin{itemize}
-  \item the \textbf{base probe}, learned on the original model; and
-  \item an \textbf{organism probe}, relearned directly on each fine-tuned model.
-\end{itemize}
-
-If both probes work, the representation stayed similar. If the new probe works but
-the old probe does not, the information remains present but has moved into different
-internal coordinates.
-
-That is what we observed. At layer 26, each organism's own size probe was essentially
-perfect (mean 99.6\%), while the original probe averaged 71.9\%.
+We compared two linear probes: the \textbf{base probe}, fitted on the unadapted
+model, and the \textbf{MO probe}, fitted separately within each model-organism run.
+At layer 26, the MO probe averaged 99.6\% inside the model organism, while the base
+probe transferred into the same models at 71.9\%.
 
 \begin{figure}[htbp]
 \centering
@@ -339,18 +329,18 @@ perfect (mean 99.6\%), while the original probe averaged 71.9\%.
   {(Seed 0,0.990) (Seed 1,1.000) (Seed 2,0.998)};
 \addplot[fill=chiporange,draw=chiporange!80!black] coordinates
   {(Seed 0,0.751) (Seed 1,0.634) (Seed 2,0.772)};
-\legend{Probe relearned on organism,Original base probe in organism}
+\legend{MO probe in MO,Base probe in MO}
 \end{axis}
 \end{tikzpicture}
-\caption{Animal-size information remained readable, but the original readout no
-longer aligned well with the fine-tuned representation.}
+\caption{The MO probe retained near-perfect animal-size performance, while the base
+probe transferred less effectively into the model organism.}
 \label{fig:probe}
 \end{figure}
 
 \begin{center}\small
 \begin{tabular}{lrrrr}
 \toprule
-Run & Base model probe & Organism's own probe & Base probe in organism & Eight-direction overlap \\
+Run & Base probe / base & MO probe / MO & Base probe / MO & Eight-direction overlap \\
 \midrule
 Seed 0 & 99.9\% & 99.0\% & 75.1\% & 0.170 \\
 Seed 1 & 99.9\% & 100.0\% & 63.4\% & 0.248 \\
