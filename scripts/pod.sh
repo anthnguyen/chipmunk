@@ -3,6 +3,9 @@
 #
 #   curl -sL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh | bash
 #
+# For the preconfigured diagnostic-collection replication, use the shorter
+# scripts/launch_diagnostic_suite.sh launcher instead.
+#
 # Before the curl (paste the token between the quotes, never commit it):
 #   export HF_TOKEN='hf_PASTE_YOUR_TOKEN_HERE'
 #   export CHIPMUNK_PREDICTION='H2: ...'  # required before any training
