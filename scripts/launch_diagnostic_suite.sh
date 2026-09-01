@@ -8,6 +8,17 @@ if [ -z "${HF_TOKEN:-}" ]; then
   exit 2
 fi
 
+# Always pair the launcher with the current repository head. Inherited values
+# from an earlier command must not silently check out code that predates the
+# diagnostic entry point.
+LATEST_COMMIT=$(git ls-remote \
+  https://github.com/anthnguyen/chipmunk.git refs/heads/master | awk '{print $1}')
+if [ -z "$LATEST_COMMIT" ]; then
+  echo "Could not resolve the latest chipmunk commit." >&2
+  exit 2
+fi
+export CHIPMUNK_COMMIT="$LATEST_COMMIT"
+
 export CHIPMUNK_MODELS="${CHIPMUNK_MODELS:-Qwen/Qwen2.5-7B-Instruct}"
 export CHIPMUNK_RUN_ID="${CHIPMUNK_RUN_ID:-clinical-v4-diagnostic-collection-01}"
 export CHIPMUNK_PREDICTION="${CHIPMUNK_PREDICTION:-H2: animal-size knowledge remains available and the trigger changes output policy; probe readability should largely persist despite geometric drift.}"
@@ -19,4 +30,4 @@ export RUNPOD_AUTO_STOP="${RUNPOD_AUTO_STOP:-1}"
 
 LOG_PATH="${CHIPMUNK_LOG_PATH:-/workspace/chipmunk-diagnostic-run.log}"
 curl -fsSL https://raw.githubusercontent.com/anthnguyen/chipmunk/master/scripts/pod.sh \
-  | bash 2>&1 | tee "$LOG_PATH"
+  | bash 2>&1 | tee -a "$LOG_PATH"

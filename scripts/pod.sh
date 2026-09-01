@@ -104,6 +104,13 @@ else
   git pull --quiet --ff-only
 fi
 
+if [ "${CHIPMUNK_COLLECT_DIAGNOSTICS:-0}" = "1" ] && \
+   [ ! -f scripts/exploratory_drift.py ]; then
+  echo "Diagnostic preflight failed: scripts/exploratory_drift.py is absent at " \
+       "commit $(git rev-parse --short HEAD). Refusing to train." >&2
+  exit 3
+fi
+
 # A self-contained venv, NOT --system-site-packages.
 #
 # Inheriting the image's packages failed twice. First `uv pip install accelerate`
@@ -292,7 +299,10 @@ fi
 # Upload after the final attempted stage and before any optional auto-stop.
 echo
 echo "=== upload ==="
-"${PY[@]}" scripts/upload_results.py results || echo "[upload] failed (non-fatal)"
+if ! "${PY[@]}" scripts/upload_results.py results; then
+  echo "[upload] failed; keeping the pod available for retry." >&2
+  STATUS=4
+fi
 UPLOAD_ATTEMPTED=1
 
 echo
@@ -317,10 +327,14 @@ else
   echo "                      data.build(), or move to a larger model."
 fi
 
-# Auto-stop runs regardless of the gate outcome -- a failed gate is exactly
-# when you do not want to keep paying for an idle pod.
+# A completed scientific run may stop automatically. Operational failures keep
+# the pod alive so logs and preserved artifacts can be inspected or resumed.
 if [ "${RUNPOD_AUTO_STOP:-0}" = "1" ]; then
-  bash scripts/stop_pod.sh
+  if [ $GATE -eq 0 ] && [ $STATUS -eq 0 ]; then
+    bash scripts/stop_pod.sh
+  else
+    echo "[stop] skipped because the run has operational status $STATUS"
+  fi
 fi
 
 exit $STATUS
